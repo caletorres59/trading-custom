@@ -1,0 +1,24 @@
+mode: PAPER
+
+symbols:
+  - BTCUSDT
+
+timeframe: "5m"
+
+starting_equity: 1000 # paper money, in quote currency (USDT)
+
+strategy:
+  name: sma_crossover
+  fast_period: 20
+  slow_period: 50
+
+risk:
+  max_daily_loss_pct: 0.5
+  max_trade_risk_pct: 0.10
+  max_position_pct: 1.0
+  max_portfolio_exposure_pct: 5.0
+  max_drawdown_pct: 8.0
+  max_leverage: 1.0
+  max_trades_per_day: 10
+
+loop_interval_seconds: 60
