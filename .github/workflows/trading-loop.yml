@@ -1,9 +1,11 @@
 name: Aurora Trading Loop
 
-# Re-saved to force GitHub to (re)register the schedule trigger.
+# GitHub's native `schedule` trigger proved unreliable for this repo (never
+# fired on its own after 1h15m+ despite correct config) - Supabase pg_cron
+# now drives this via workflow_dispatch every 5 minutes instead. Keeping
+# only workflow_dispatch avoids double-firing if GitHub's scheduler ever
+# does wake up on its own.
 on:
-  schedule:
-    - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
 jobs:
