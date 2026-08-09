@@ -75,6 +75,21 @@ class PortfolioState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class EquitySnapshot(Base):
+    """One row per run_once(), so the dashboard has a real time series to
+    chart instead of only ever seeing the latest PortfolioState."""
+
+    __tablename__ = "equity_history"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    equity: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    cash: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    peak_equity: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    drawdown_pct: Mapped[Decimal] = mapped_column(Numeric(10, 4))
+    daily_pnl: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 

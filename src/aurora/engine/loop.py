@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from aurora.broker.base import Order, OrderSide, OrderType, TradingBroker
 from aurora.broker.paper_broker import PaperSimulatorBroker
 from aurora.config import AppConfig
-from aurora.db.models import AuditEvent, OrderRecord, RiskDecisionRecord, SignalRecord
+from aurora.db.models import AuditEvent, EquitySnapshot, OrderRecord, RiskDecisionRecord, SignalRecord
 from aurora.db.portfolio_store import save_portfolio_state
 from aurora.db.session import session_scope
 from aurora.market_data.coinbase_provider import CoinbasePublicMarketData
@@ -50,6 +50,23 @@ class TradingLoop:
             self._process_symbol(symbol)
         if isinstance(self.broker, PaperSimulatorBroker):
             save_portfolio_state(self.session_factory, self.broker.export_state())
+            self._record_equity_snapshot()
+
+    def _record_equity_snapshot(self) -> None:
+        account = self.broker.get_account()
+        drawdown_pct = (
+            (account.peak_equity - account.equity) / account.peak_equity * Decimal("100")
+            if account.peak_equity
+            else Decimal("0")
+        )
+        with session_scope(self.session_factory) as session:
+            session.add(EquitySnapshot(
+                equity=account.equity,
+                cash=account.available_balance,
+                peak_equity=account.peak_equity,
+                drawdown_pct=drawdown_pct,
+                daily_pnl=account.daily_pnl,
+            ))
 
     def run_forever(self) -> None:
         while True:
