@@ -57,6 +57,7 @@ class PaperSimulatorBroker(TradingBroker):
     def update_price(self, symbol: str, price: Decimal) -> None:
         self._last_price[symbol] = price
         self._roll_day_if_needed()
+        self._peak_equity = max(self._peak_equity, self._equity())
 
     def _roll_day_if_needed(self) -> None:
         today = self._clock().date()
@@ -98,7 +99,6 @@ class PaperSimulatorBroker(TradingBroker):
         else:
             self._positions[order.symbol] = Position(order.symbol, new_qty, fill_price)
 
-        self._peak_equity = max(self._peak_equity, self._equity())
         self.trades_today += 1
 
         result = OrderResult(
