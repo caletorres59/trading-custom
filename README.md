@@ -10,7 +10,7 @@ nadie puede modificar en caliente.
 
 Un workflow de **GitHub Actions** (`.github/workflows/trading-loop.yml`)
 despierta cada 5 minutos, ejecuta `python -m aurora.main --once` contra
-datos reales de Binance, y guarda el resultado en una base **Postgres en
+datos reales de Coinbase, y guarda el resultado en una base **Postgres en
 Supabase** (proyecto `aurora-trading-mvp`, región São Paulo). No hay ningún
 servidor propio que mantener — GitHub se encarga del scheduling.
 
@@ -23,7 +23,10 @@ servidor propio que mantener — GitHub se encarga del scheduling.
 
 ## Qué incluye
 
-- `market_data`: klines públicos de Binance (sin API key).
+- `market_data`: klines públicos de Coinbase Exchange (sin API key). Se
+  eligió Coinbase y no Binance porque Binance bloquea las conexiones desde
+  IPs de datacenters de EE.UU. — incluidas las de los runners de GitHub
+  Actions — por restricción de jurisdicción en sus términos de servicio.
 - `strategy`: una estrategia base — cruce de medias móviles (SMA).
 - `risk`: motor de riesgo duro, determinístico, con límites porcentuales
   (pérdida diaria máxima, drawdown máximo, exposición máxima, trades/día).
@@ -37,8 +40,11 @@ servidor propio que mantener — GitHub se encarga del scheduling.
 
 ## Qué NO incluye todavía
 
-- Conexión a Binance Testnet (matching engine real) — hoy es un simulador
-  local, ver `paper_broker.py`.
+- Conexión a un exchange real en modo testnet/sandbox (matching engine
+  real) — hoy es un simulador local, ver `paper_broker.py`. Al elegir cuál,
+  hay que verificar primero que ese testnet también sea accesible desde las
+  IPs de GitHub Actions (el mismo problema que ya nos pasó con la API de
+  datos de Binance).
 - Agentes de ML/LLM/noticias/sentimiento del spec completo.
 - Distancia de stop fija (1%) en vez de calculada por volatilidad (ATR).
 
@@ -91,7 +97,7 @@ Repite cada `loop_interval_seconds` (configurable en `config/config.yaml`).
 1. Dejarlo correr varios días/semanas en GitHub Actions y revisar el estado
    del portafolio en Supabase (tabla `portfolio_state`) y el historial en
    `signals` / `risk_decisions` / `orders`.
-2. Reemplazar el simulador por un broker conectado a Binance Testnet
+2. Reemplazar el simulador por un broker conectado a un testnet real
    (misma interfaz `TradingBroker`, sin tocar el resto del sistema).
 3. Calcular la distancia de stop con ATR en vez del valor fijo.
 4. Agregar backtesting sobre datos históricos antes de confiar en la

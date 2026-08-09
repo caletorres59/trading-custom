@@ -1,7 +1,7 @@
 mode: PAPER
 
 symbols:
-  - BTCUSDT
+  - BTC-USD
 
 timeframe: "5m"
 

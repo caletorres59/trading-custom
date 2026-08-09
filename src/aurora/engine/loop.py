@@ -14,7 +14,7 @@ from aurora.config import AppConfig
 from aurora.db.models import AuditEvent, OrderRecord, RiskDecisionRecord, SignalRecord
 from aurora.db.portfolio_store import save_portfolio_state
 from aurora.db.session import session_scope
-from aurora.market_data.binance_provider import BinancePublicMarketData
+from aurora.market_data.coinbase_provider import CoinbasePublicMarketData
 from aurora.risk.risk_engine import AccountState, HardRiskEngine, RiskDecisionType, TradeRequest
 from aurora.strategy.base import Direction, Strategy
 
@@ -32,7 +32,7 @@ class TradingLoop:
     def __init__(
         self,
         config: AppConfig,
-        market_data: BinancePublicMarketData,
+        market_data: CoinbasePublicMarketData,
         broker: TradingBroker,
         strategy: Strategy,
         risk_engine: HardRiskEngine,

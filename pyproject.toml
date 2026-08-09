@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Aurora Trading AI - lean Python MVP: paper trading, hard risk limits, one baseline strategy"
 requires-python = ">=3.11"
 dependencies = [
-    "python-binance>=1.0.19",
+    "requests>=2.31",
     "SQLAlchemy>=2.0",
     "psycopg2-binary>=2.9",
     "PyYAML>=6.0",

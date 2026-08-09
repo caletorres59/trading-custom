@@ -10,7 +10,7 @@ from aurora.config import AppConfig, load_config
 from aurora.db.portfolio_store import load_portfolio_state
 from aurora.db.session import init_db
 from aurora.engine.loop import TradingLoop
-from aurora.market_data.binance_provider import BinancePublicMarketData
+from aurora.market_data.coinbase_provider import CoinbasePublicMarketData
 from aurora.risk.risk_engine import HardRiskEngine
 from aurora.strategy.sma_crossover import SmaCrossoverStrategy
 
@@ -38,7 +38,7 @@ def main() -> None:
 
     portfolio_state = load_portfolio_state(session_factory, config.starting_equity)
     broker = PaperSimulatorBroker(state=portfolio_state)
-    market_data = BinancePublicMarketData()
+    market_data = CoinbasePublicMarketData()
     strategy = build_strategy(config)
     risk_engine = HardRiskEngine(config.risk)
 
