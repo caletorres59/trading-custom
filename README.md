@@ -9,17 +9,26 @@ nadie puede modificar en caliente.
 ## Cómo corre en producción (paper trading)
 
 Un workflow de **GitHub Actions** (`.github/workflows/trading-loop.yml`)
-despierta cada 5 minutos, ejecuta `python -m aurora.main --once` contra
-datos reales de Coinbase, y guarda el resultado en una base **Postgres en
-Supabase** (proyecto `aurora-trading-mvp`, región São Paulo). No hay ningún
-servidor propio que mantener — GitHub se encarga del scheduling.
+ejecuta `python -m aurora.main --once` contra datos reales de Coinbase cada
+vez que se dispara, y guarda el resultado en una base **Postgres en
+Supabase** (proyecto `aurora-trading-mvp`, región São Paulo).
+
+**El disparo cada 5 minutos lo hace Supabase (`pg_cron` + `pg_net`), no el
+`schedule` nativo de GitHub Actions.** Se probó primero con `schedule` y
+resultó poco confiable para este repo (nunca se activó solo durante más de
+una hora, con todo bien configurado — un problema conocido de GitHub para
+workflows programados nuevos). Ahora un cron job en Supabase
+(`aurora-trigger-github-actions`, cada 5 min) llama a la API de GitHub
+(`workflow_dispatch`) usando un token de acceso de alcance mínimo (solo
+`Actions: read/write` en este repo) guardado en el **Vault de Supabase**.
+El archivo del workflow solo declara `workflow_dispatch: {}`.
 
 - Dispara manualmente desde la pestaña **Actions** del repo con "Run workflow"
-  si quieres una corrida inmediata sin esperar el cron.
-- Las credenciales de conexión viven en el secret `DATABASE_URL` del repo
-  (Settings → Secrets and variables → Actions) — nunca en el código.
-- GitHub apaga los workflows programados automáticamente si el repo pasa
-  60 días sin actividad; si eso pasa, basta con reactivarlo desde Actions.
+  si quieres una corrida inmediata.
+- Las credenciales de conexión a la base viven en el secret `DATABASE_URL`
+  del repo (Settings → Secrets and variables → Actions) — nunca en el código.
+- El cron job y el token viven en Supabase, no en GitHub — para revisarlos:
+  SQL Editor → `select * from cron.job;` / `cron.job_run_details`.
 
 ## Qué incluye
 
@@ -36,7 +45,23 @@ servidor propio que mantener — GitHub se encarga del scheduling.
   corrida de GitHub Actions sea un proceso nuevo que se apaga al terminar.
 - `db`: cada señal, decisión de riesgo, orden y evento de auditoría queda
   guardado con un `correlation_id` común, para poder responder "¿por qué se
-  ejecutó esta operación?".
+  ejecutó esta operación?". `equity_history` guarda un snapshot por
+  ejecución para poder graficar el equity en el tiempo.
+- `backtest`: motor de backtest (`python -m aurora.backtest --days N`) que
+  reproduce el mismo pipeline Strategy → HardRiskEngine → PaperSimulatorBroker
+  de la app en vivo contra datos históricos reales de Coinbase (paginados,
+  hasta 300 velas por request). Resultado del primer backtest (90 días,
+  BTC-USD 5m, config actual): **-0.53% total / -0.18% mensual promedio**,
+  628 operaciones, drawdown máximo 0.61%. La estrategia queda prácticamente
+  en tablas antes de comisiones — lo que la hunde son las comisiones de
+  operar tan seguido en mercado lateral (confianza de señal casi siempre
+  ~0.00-0.01). Próximo experimento: filtrar señales por confianza mínima
+  para reducir el "whipsaw" y volver a correr el backtest.
+- `dashboard/`: app Next.js desplegada en Vercel
+  (https://dashboard-ten-coral-49.vercel.app) que se conecta a Supabase con
+  una llave pública de solo lectura (RLS) y usa Supabase Realtime para
+  actualizarse sola — equity curve, señales, decisiones de riesgo, órdenes,
+  contador de ejecuciones totales.
 
 ## Qué NO incluye todavía
 
@@ -94,11 +119,19 @@ Repite cada `loop_interval_seconds` (configurable en `config/config.yaml`).
 
 ## Próximos pasos naturales
 
-1. Dejarlo correr varios días/semanas en GitHub Actions y revisar el estado
-   del portafolio en Supabase (tabla `portfolio_state`) y el historial en
-   `signals` / `risk_decisions` / `orders`.
-2. Reemplazar el simulador por un broker conectado a un testnet real
-   (misma interfaz `TradingBroker`, sin tocar el resto del sistema).
-3. Calcular la distancia de stop con ATR en vez del valor fijo.
-4. Agregar backtesting sobre datos históricos antes de confiar en la
-   estrategia con dinero real, aunque sea de prueba.
+1. Agregar un filtro de confianza mínima a `SmaCrossoverStrategy` para
+   descartar señales de ruido (la mayoría de las 628 operaciones del primer
+   backtest tuvieron confianza ~0.00-0.01) y volver a correr el backtest
+   para ver si mejora el -0.18%/mes actual.
+2. Dejarlo correr varios días/semanas y revisar el estado real del
+   portafolio en Supabase (`portfolio_state`, `equity_history`) y en el
+   dashboard.
+3. Reemplazar el simulador por un broker conectado a un testnet real
+   (misma interfaz `TradingBroker`, sin tocar el resto del sistema) —
+   verificar primero que ese testnet sea accesible desde las IPs de GitHub
+   Actions (mismo problema que tuvimos con la API de datos de Binance).
+4. Calcular la distancia de stop con ATR en vez del valor fijo (1%).
+5. Checklist de "listo para dinero real" (ver memoria del proyecto): backtest
+   rentable, 30+ días corridos sin fallas, 20-30 operaciones reales,
+   drawdown real dentro del límite configurado — recién ahí, con aprobación
+   manual, no antes.
