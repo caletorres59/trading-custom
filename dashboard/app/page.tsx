@@ -115,10 +115,11 @@ export default function DashboardPage() {
   const [equityHistory, setEquityHistory] = useState<EquitySnapshot[]>([]);
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [executionCount, setExecutionCount] = useState<number | null>(null);
 
   useEffect(() => {
     async function loadInitialData() {
-      const [signalsRes, risksRes, ordersRes, portfolioRes, equityRes] =
+      const [signalsRes, risksRes, ordersRes, portfolioRes, equityRes, countRes] =
         await Promise.all([
           supabase
             .from("signals")
@@ -145,6 +146,9 @@ export default function DashboardPage() {
             .select("*")
             .order("created_at", { ascending: false })
             .limit(MAX_CHART_POINTS),
+          // Each run_once() writes exactly one signal per configured symbol,
+          // so this count doubles as "how many times has the loop executed".
+          supabase.from("signals").select("*", { count: "exact", head: true }),
         ]);
 
       if (signalsRes.data) setSignals(signalsRes.data as Signal[]);
@@ -156,6 +160,7 @@ export default function DashboardPage() {
           (equityRes.data as EquitySnapshot[]).slice().reverse(),
         );
       }
+      if (typeof countRes.count === "number") setExecutionCount(countRes.count);
       setLoading(false);
     }
 
@@ -170,6 +175,7 @@ export default function DashboardPage() {
           setSignals((prev) =>
             [payload.new as Signal, ...prev].slice(0, MAX_FEED_ROWS),
           );
+          setExecutionCount((prev) => (prev ?? 0) + 1);
         },
       )
       .on(
@@ -247,7 +253,11 @@ export default function DashboardPage() {
           <p className="text-zinc-500">Cargando datos…</p>
         ) : (
           <>
-            <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+            <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-7">
+              <StatTile
+                label="Ejecuciones"
+                value={executionCount === null ? "—" : String(executionCount)}
+              />
               <StatTile label="Equity" value={money(latestEquity?.equity)} />
               <StatTile label="Cash" value={money(latestEquity?.cash)} />
               <StatTile
