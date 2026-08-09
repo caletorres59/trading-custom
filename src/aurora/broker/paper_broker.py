@@ -86,18 +86,35 @@ class PaperSimulatorBroker(TradingBroker):
         fee = notional * TAKER_FEE_RATE
 
         position = self._positions.get(order.symbol, Position(order.symbol, Decimal("0"), fill_price))
+        old_qty = position.quantity
 
         if order.side == OrderSide.BUY:
             self._cash -= notional + fee
-            new_qty = position.quantity + order.quantity
+            new_qty = old_qty + order.quantity
         else:
             self._cash += notional - fee
-            new_qty = position.quantity - order.quantity
+            new_qty = old_qty - order.quantity
 
         if new_qty == 0:
             self._positions.pop(order.symbol, None)
         else:
-            self._positions[order.symbol] = Position(order.symbol, new_qty, fill_price)
+            adding_to_position = (
+                old_qty == 0
+                or (old_qty > 0 and order.side == OrderSide.BUY)
+                or (old_qty < 0 and order.side == OrderSide.SELL)
+            )
+            if adding_to_position:
+                # Weighted average of the existing cost basis and this fill.
+                new_avg = (abs(old_qty) * position.average_entry_price + order.quantity * fill_price) / abs(
+                    new_qty
+                )
+            elif (old_qty > 0) == (new_qty > 0):
+                # Partial close: remaining shares keep their original cost basis.
+                new_avg = position.average_entry_price
+            else:
+                # Flipped through zero to the opposite side: fresh cost basis.
+                new_avg = fill_price
+            self._positions[order.symbol] = Position(order.symbol, new_qty, new_avg)
 
         self.trades_today += 1
 
