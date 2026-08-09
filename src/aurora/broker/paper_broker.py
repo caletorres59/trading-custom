@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Callable
 
 from aurora.broker.base import (
     AccountSnapshot,
@@ -26,9 +27,19 @@ class PaperSimulatorBroker(TradingBroker):
     Takes its starting state explicitly (see db.portfolio_store) instead
     of always starting from starting_equity, so it can resume correctly
     across ephemeral runs (e.g. one process per GitHub Actions run) that
-    don't share memory with each other."""
+    don't share memory with each other.
 
-    def __init__(self, state: dict, quote_currency: str = "USDT"):
+    `clock` defaults to wall-clock time (live trading) but can be swapped
+    for a simulated clock so a backtest's day-rollover (daily loss reset,
+    trades-per-day reset) tracks simulated historical time instead of the
+    real current date."""
+
+    def __init__(
+        self,
+        state: dict,
+        quote_currency: str = "USDT",
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+    ):
         self._cash: Decimal = state["cash"]
         self._peak_equity: Decimal = state["peak_equity"]
         self._equity_at_day_start: Decimal = state["equity_at_day_start"]
@@ -41,13 +52,14 @@ class PaperSimulatorBroker(TradingBroker):
         self._last_price: dict[str, Decimal] = {}
         self._orders: dict[str, OrderResult] = {}
         self.quote_currency = quote_currency
+        self._clock = clock
 
     def update_price(self, symbol: str, price: Decimal) -> None:
         self._last_price[symbol] = price
         self._roll_day_if_needed()
 
     def _roll_day_if_needed(self) -> None:
-        today = datetime.now(timezone.utc).date()
+        today = self._clock().date()
         if today != self._day:
             self._day = today
             self._equity_at_day_start = self._equity()
@@ -94,7 +106,7 @@ class PaperSimulatorBroker(TradingBroker):
             status=OrderStatus.FILLED,
             filled_quantity=order.quantity,
             average_fill_price=fill_price,
-            submitted_at=datetime.now(timezone.utc),
+            submitted_at=self._clock(),
         )
         self._orders[result.broker_order_id] = result
         return result

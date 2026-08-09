@@ -11,11 +11,12 @@ class SmaCrossoverStrategy(Strategy):
 
     name = "sma_crossover"
 
-    def __init__(self, fast_period: int = 20, slow_period: int = 50):
+    def __init__(self, fast_period: int = 20, slow_period: int = 50, min_confidence: float = 0.0):
         if fast_period >= slow_period:
             raise ValueError("fast_period must be < slow_period")
         self.fast_period = fast_period
         self.slow_period = slow_period
+        self.min_confidence = min_confidence
 
     def generate_signal(self, symbol: str, candles: pd.DataFrame) -> Signal:
         if len(candles) < self.slow_period + 1:
@@ -34,6 +35,8 @@ class SmaCrossoverStrategy(Strategy):
         separation = abs(fast_now - slow_now) / slow_now
         confidence = min(1.0, float(separation) * 20)
 
+        if (crossed_up or crossed_down) and confidence < self.min_confidence:
+            return Signal(symbol, Direction.NO_TRADE, confidence, ["BELOW_MIN_CONFIDENCE"])
         if crossed_up:
             return Signal(symbol, Direction.LONG, confidence, ["SMA_CROSS_UP"])
         if crossed_down:
