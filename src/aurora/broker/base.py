@@ -60,6 +60,7 @@ class AccountSnapshot:
     available_balance: Decimal
     daily_pnl: Decimal
     peak_equity: Decimal
+    trades_today: int
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 

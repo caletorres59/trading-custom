@@ -12,6 +12,7 @@ from aurora.broker.base import Order, OrderSide, OrderType, TradingBroker
 from aurora.broker.paper_broker import PaperSimulatorBroker
 from aurora.config import AppConfig
 from aurora.db.models import AuditEvent, OrderRecord, RiskDecisionRecord, SignalRecord
+from aurora.db.portfolio_store import save_portfolio_state
 from aurora.db.session import session_scope
 from aurora.market_data.binance_provider import BinancePublicMarketData
 from aurora.risk.risk_engine import AccountState, HardRiskEngine, RiskDecisionType, TradeRequest
@@ -43,11 +44,12 @@ class TradingLoop:
         self.strategy = strategy
         self.risk_engine = risk_engine
         self.session_factory = session_factory
-        self._trades_today = 0
 
     def run_once(self) -> None:
         for symbol in self.config.symbols:
             self._process_symbol(symbol)
+        if isinstance(self.broker, PaperSimulatorBroker):
+            save_portfolio_state(self.session_factory, self.broker.export_state())
 
     def run_forever(self) -> None:
         while True:
@@ -92,7 +94,7 @@ class TradingLoop:
             peak_equity=account.peak_equity,
             daily_pnl=account.daily_pnl,
             current_exposure_pct=exposure_pct,
-            trades_today=self._trades_today,
+            trades_today=account.trades_today,
         )
         trade_request = TradeRequest(
             symbol=symbol,
@@ -124,7 +126,6 @@ class TradingLoop:
         side = OrderSide.BUY if signal.direction == Direction.LONG else OrderSide.SELL
         order = Order(symbol=symbol, side=side, order_type=OrderType.MARKET, quantity=quantity)
         result = self.broker.submit(order)
-        self._trades_today += 1
 
         with session_scope(self.session_factory) as session:
             session.add(OrderRecord(

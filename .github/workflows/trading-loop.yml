@@ -1,0 +1,25 @@
+name: Aurora Trading Loop
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  run-once:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -e .
+
+      - name: Run one trading loop iteration
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python -m aurora.main --once

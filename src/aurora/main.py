@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 from aurora.broker.paper_broker import PaperSimulatorBroker
 from aurora.config import AppConfig, load_config
+from aurora.db.portfolio_store import load_portfolio_state
 from aurora.db.session import init_db
 from aurora.engine.loop import TradingLoop
 from aurora.market_data.binance_provider import BinancePublicMarketData
@@ -35,7 +36,8 @@ def main() -> None:
     config = load_config(args.config)
     session_factory = init_db(config.database_url)
 
-    broker = PaperSimulatorBroker(starting_equity=config.starting_equity)
+    portfolio_state = load_portfolio_state(session_factory, config.starting_equity)
+    broker = PaperSimulatorBroker(state=portfolio_state)
     market_data = BinancePublicMarketData()
     strategy = build_strategy(config)
     risk_engine = HardRiskEngine(config.risk)

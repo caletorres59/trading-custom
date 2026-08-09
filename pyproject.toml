@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "python-binance>=1.0.19",
     "SQLAlchemy>=2.0",
+    "psycopg2-binary>=2.9",
     "PyYAML>=6.0",
     "python-dotenv>=1.0",
     "pandas>=2.0",
@@ -14,7 +15,6 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
-postgres = ["psycopg2-binary>=2.9"]
 
 [build-system]
 requires = ["setuptools>=68"]

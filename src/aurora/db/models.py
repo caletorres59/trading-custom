@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import DateTime, Numeric, String, Text
+from sqlalchemy import DateTime, Integer, Numeric, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -56,6 +56,23 @@ class OrderRecord(Base):
     fill_price: Mapped[Decimal] = mapped_column(Numeric(20, 8))
     status: Mapped[str] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class PortfolioState(Base):
+    """Single-row table holding the paper broker's account state, so it
+    survives across ephemeral runs (one process per scheduled execution)
+    instead of living only in memory."""
+
+    __tablename__ = "portfolio_state"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    cash: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    peak_equity: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    equity_at_day_start: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    state_day: Mapped[str] = mapped_column(String)
+    trades_today: Mapped[int] = mapped_column(Integer, default=0)
+    positions_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 class AuditEvent(Base):

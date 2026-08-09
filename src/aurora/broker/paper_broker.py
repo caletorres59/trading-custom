@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from aurora.broker.base import (
@@ -21,14 +21,23 @@ TAKER_FEE_RATE = Decimal("0.001")  # 0.1%, matches typical spot exchange taker f
 class PaperSimulatorBroker(TradingBroker):
     """Local fill simulator: no network calls, fake money. Mirrors the
     spec's PaperBroker. Market orders fill instantly at the last price
-    fed via update_price(), minus a simulated taker fee."""
+    fed via update_price(), minus a simulated taker fee.
 
-    def __init__(self, starting_equity: Decimal, quote_currency: str = "USDT"):
-        self._cash = starting_equity
-        self._peak_equity = starting_equity
-        self._day = datetime.now(timezone.utc).date()
-        self._equity_at_day_start = starting_equity
-        self._positions: dict[str, Position] = {}
+    Takes its starting state explicitly (see db.portfolio_store) instead
+    of always starting from starting_equity, so it can resume correctly
+    across ephemeral runs (e.g. one process per GitHub Actions run) that
+    don't share memory with each other."""
+
+    def __init__(self, state: dict, quote_currency: str = "USDT"):
+        self._cash: Decimal = state["cash"]
+        self._peak_equity: Decimal = state["peak_equity"]
+        self._equity_at_day_start: Decimal = state["equity_at_day_start"]
+        self._day: date = date.fromisoformat(state["state_day"])
+        self.trades_today: int = state["trades_today"]
+        self._positions: dict[str, Position] = {
+            symbol: Position(symbol, Decimal(p["quantity"]), Decimal(p["average_entry_price"]))
+            for symbol, p in state["positions"].items()
+        }
         self._last_price: dict[str, Decimal] = {}
         self._orders: dict[str, OrderResult] = {}
         self.quote_currency = quote_currency
@@ -42,6 +51,7 @@ class PaperSimulatorBroker(TradingBroker):
         if today != self._day:
             self._day = today
             self._equity_at_day_start = self._equity()
+            self.trades_today = 0
 
     def _equity(self) -> Decimal:
         equity = self._cash
@@ -77,6 +87,7 @@ class PaperSimulatorBroker(TradingBroker):
             self._positions[order.symbol] = Position(order.symbol, new_qty, fill_price)
 
         self._peak_equity = max(self._peak_equity, self._equity())
+        self.trades_today += 1
 
         result = OrderResult(
             broker_order_id=str(uuid.uuid4()),
@@ -103,7 +114,24 @@ class PaperSimulatorBroker(TradingBroker):
             available_balance=self._cash,
             daily_pnl=daily_pnl,
             peak_equity=self._peak_equity,
+            trades_today=self.trades_today,
         )
 
     def get_positions(self) -> list[Position]:
         return list(self._positions.values())
+
+    def export_state(self) -> dict:
+        return {
+            "cash": self._cash,
+            "peak_equity": self._peak_equity,
+            "equity_at_day_start": self._equity_at_day_start,
+            "state_day": self._day.isoformat(),
+            "trades_today": self.trades_today,
+            "positions": {
+                symbol: {
+                    "quantity": str(position.quantity),
+                    "average_entry_price": str(position.average_entry_price),
+                }
+                for symbol, position in self._positions.items()
+            },
+        }
