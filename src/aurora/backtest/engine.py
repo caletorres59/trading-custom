@@ -37,6 +37,7 @@ class BacktestResult:
     max_drawdown_pct: Decimal
     risk_rejections: int
     emergency_stops: int
+    circuit_breaker_flattens: int
 
     @property
     def total_return_pct(self) -> Decimal:
@@ -109,6 +110,7 @@ class BacktestEngine:
         total_fees = Decimal("0")
         risk_rejections = 0
         emergency_stops = 0
+        circuit_breaker_flattens = 0
         last_recorded_day = None
 
         for i in range(min_lookback, len(candles)):
@@ -117,6 +119,35 @@ class BacktestEngine:
             clock_box["now"] = row["open_time"].to_pydatetime()
             last_price = Decimal(str(row["close"]))
             broker.update_price(self.symbol, last_price)
+
+            account = broker.get_account()
+            kill_switch = self.risk_engine.check_kill_switch(AccountState(
+                equity=account.equity,
+                equity_at_day_start=account.equity - account.daily_pnl,
+                peak_equity=account.peak_equity,
+                daily_pnl=account.daily_pnl,
+                current_exposure_pct=Decimal("0"),
+                trades_today=account.trades_today,
+            ))
+            if kill_switch is not None:
+                for position in broker.get_positions():
+                    if position.quantity == 0:
+                        continue
+                    side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
+                    order = Order(symbol=self.symbol, side=side, order_type=OrderType.MARKET, quantity=abs(position.quantity))
+                    result = broker.submit(order)
+                    fee = result.filled_quantity * (result.average_fill_price or Decimal("0")) * Decimal("0.001")
+                    total_fees += fee
+                    circuit_breaker_flattens += 1
+                    trades.append(TradeLogEntry(
+                        time=row["open_time"],
+                        direction="FLATTEN",
+                        side=side.value,
+                        quantity=result.filled_quantity,
+                        price=result.average_fill_price or Decimal("0"),
+                        confidence=0.0,
+                        risk_decision=kill_switch.decision.value,
+                    ))
 
             signal = self.strategy.generate_signal(self.symbol, window)
 
@@ -191,4 +222,5 @@ class BacktestEngine:
             max_drawdown_pct=max_dd,
             risk_rejections=risk_rejections,
             emergency_stops=emergency_stops,
+            circuit_breaker_flattens=circuit_breaker_flattens,
         )

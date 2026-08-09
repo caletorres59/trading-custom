@@ -48,22 +48,36 @@ class HardRiskEngine:
     def __init__(self, limits: RiskLimits):
         self._limits = limits
 
-    def evaluate(self, request: TradeRequest, account: AccountState) -> RiskDecision:
-        daily_loss_pct = -(account.daily_pnl / account.equity_at_day_start) * Decimal("100")
-        if daily_loss_pct >= self._limits.max_daily_loss_pct:
-            return RiskDecision(
-                RiskDecisionType.EMERGENCY_STOP,
-                Decimal("0"),
-                [f"MAX_DAILY_LOSS_BREACHED:{daily_loss_pct:.4f}%"],
-            )
+    def check_kill_switch(self, account: AccountState) -> RiskDecision | None:
+        """Daily-loss and drawdown checks, split out from evaluate() so the
+        engine loop can run them on every price update - not only when a
+        strategy happens to emit a new signal. A losing position that's
+        already open must get flattened as soon as it breaches a limit,
+        not whenever the strategy next feels like speaking up."""
+        if account.equity_at_day_start > 0:
+            daily_loss_pct = -(account.daily_pnl / account.equity_at_day_start) * Decimal("100")
+            if daily_loss_pct >= self._limits.max_daily_loss_pct:
+                return RiskDecision(
+                    RiskDecisionType.EMERGENCY_STOP,
+                    Decimal("0"),
+                    [f"MAX_DAILY_LOSS_BREACHED:{daily_loss_pct:.4f}%"],
+                )
 
-        drawdown_pct = (account.peak_equity - account.equity) / account.peak_equity * Decimal("100")
-        if drawdown_pct >= self._limits.max_drawdown_pct:
-            return RiskDecision(
-                RiskDecisionType.EMERGENCY_STOP,
-                Decimal("0"),
-                [f"MAX_DRAWDOWN_BREACHED:{drawdown_pct:.4f}%"],
-            )
+        if account.peak_equity > 0:
+            drawdown_pct = (account.peak_equity - account.equity) / account.peak_equity * Decimal("100")
+            if drawdown_pct >= self._limits.max_drawdown_pct:
+                return RiskDecision(
+                    RiskDecisionType.EMERGENCY_STOP,
+                    Decimal("0"),
+                    [f"MAX_DRAWDOWN_BREACHED:{drawdown_pct:.4f}%"],
+                )
+
+        return None
+
+    def evaluate(self, request: TradeRequest, account: AccountState) -> RiskDecision:
+        kill_switch = self.check_kill_switch(account)
+        if kill_switch is not None:
+            return kill_switch
 
         if account.trades_today >= self._limits.max_trades_per_day:
             return RiskDecision(RiskDecisionType.REJECT, Decimal("0"), ["MAX_TRADES_PER_DAY_REACHED"])

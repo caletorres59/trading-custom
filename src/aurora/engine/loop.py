@@ -73,6 +73,61 @@ class TradingLoop:
             self.run_once()
             time.sleep(self.config.loop_interval_seconds)
 
+    def _enforce_kill_switch(self, symbol: str, correlation_id: str) -> None:
+        """Runs every tick, independent of whether the strategy emits a
+        signal, so a losing open position gets flattened as soon as it
+        breaches the daily-loss or max-drawdown limit - not only whenever
+        the strategy next happens to speak up (see risk_engine.check_kill_switch)."""
+        account = self.broker.get_account()
+        account_state = AccountState(
+            equity=account.equity,
+            equity_at_day_start=account.equity - account.daily_pnl,
+            peak_equity=account.peak_equity,
+            daily_pnl=account.daily_pnl,
+            current_exposure_pct=Decimal("0"),
+            trades_today=account.trades_today,
+        )
+        decision = self.risk_engine.check_kill_switch(account_state)
+        if decision is None:
+            return
+
+        for position in self.broker.get_positions():
+            if position.symbol != symbol or position.quantity == 0:
+                continue
+            side = OrderSide.SELL if position.quantity > 0 else OrderSide.BUY
+            order = Order(symbol=symbol, side=side, order_type=OrderType.MARKET, quantity=abs(position.quantity))
+            result = self.broker.submit(order)
+            logger.warning(
+                "circuit_breaker_flatten symbol=%s side=%s quantity=%s reasons=%s",
+                symbol, side.value, result.filled_quantity, decision.reasons,
+            )
+            with session_scope(self.session_factory) as session:
+                session.add(OrderRecord(
+                    correlation_id=correlation_id,
+                    broker_order_id=result.broker_order_id,
+                    symbol=symbol,
+                    side=side.value,
+                    quantity=result.filled_quantity,
+                    fill_price=result.average_fill_price or Decimal("0"),
+                    status=result.status.value,
+                ))
+                session.add(RiskDecisionRecord(
+                    correlation_id=correlation_id,
+                    decision=decision.decision.value,
+                    approved_notional=Decimal("0"),
+                    reasons=json.dumps(decision.reasons),
+                ))
+                session.add(AuditEvent(
+                    correlation_id=correlation_id,
+                    event_type="CIRCUIT_BREAKER_FLATTEN",
+                    payload=json.dumps({
+                        "symbol": symbol,
+                        "quantity": str(result.filled_quantity),
+                        "price": str(result.average_fill_price),
+                        "reasons": decision.reasons,
+                    }),
+                ))
+
     def _process_symbol(self, symbol: str) -> None:
         correlation_id = str(uuid.uuid4())
         candles = self.market_data.get_klines(symbol, self.config.timeframe)
@@ -80,6 +135,8 @@ class TradingLoop:
 
         if isinstance(self.broker, PaperSimulatorBroker):
             self.broker.update_price(symbol, last_price)
+
+        self._enforce_kill_switch(symbol, correlation_id)
 
         signal = self.strategy.generate_signal(symbol, candles)
         logger.info(

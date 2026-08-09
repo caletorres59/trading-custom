@@ -12,10 +12,14 @@ from aurora.db.session import init_db
 from aurora.engine.loop import TradingLoop
 from aurora.market_data.coinbase_provider import CoinbasePublicMarketData
 from aurora.risk.risk_engine import HardRiskEngine
+from aurora.strategy.breakout import BreakoutStrategy
 from aurora.strategy.sma_crossover import SmaCrossoverStrategy
+from aurora.strategy.volatility_spike import VolatilitySpikeStrategy
 
 STRATEGIES = {
     "sma_crossover": SmaCrossoverStrategy,
+    "breakout": BreakoutStrategy,
+    "volatility_spike": VolatilitySpikeStrategy,
 }
 
 

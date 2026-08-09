@@ -7,10 +7,14 @@ from aurora.backtest.data_loader import CoinbaseHistoricalLoader
 from aurora.backtest.engine import BacktestEngine
 from aurora.config import AppConfig, load_config
 from aurora.risk.risk_engine import HardRiskEngine
+from aurora.strategy.breakout import BreakoutStrategy
 from aurora.strategy.sma_crossover import SmaCrossoverStrategy
+from aurora.strategy.volatility_spike import VolatilitySpikeStrategy
 
 STRATEGIES = {
     "sma_crossover": SmaCrossoverStrategy,
+    "breakout": BreakoutStrategy,
+    "volatility_spike": VolatilitySpikeStrategy,
 }
 
 
@@ -56,6 +60,7 @@ def main() -> None:
     print(f"Total trades executed: {len(result.trades)}")
     print(f"Risk rejections:       {result.risk_rejections}")
     print(f"Emergency stops:       {result.emergency_stops}")
+    print(f"Circuit breaker flattens: {result.circuit_breaker_flattens}")
     print(f"Total fees paid:       ${result.total_fees:,.2f}")
     print("=" * 60)
 

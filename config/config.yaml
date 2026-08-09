@@ -8,10 +8,9 @@ timeframe: "5m"
 starting_equity: 1000 # paper money, in quote currency (USDT)
 
 strategy:
-  name: sma_crossover
-  fast_period: 20
-  slow_period: 50
-  min_confidence: 0.01
+  name: volatility_spike
+  window: 20
+  spike_multiplier: 2.0
 
 risk:
   max_daily_loss_pct: 0.5
