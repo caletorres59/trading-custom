@@ -160,6 +160,9 @@ class BacktestEngine:
                 exposure_pct = (
                     (exposure_notional / account.equity * Decimal("100")) if account.equity else Decimal("0")
                 )
+                position_quantity = next(
+                    (p.quantity for p in positions if p.symbol == self.symbol), Decimal("0")
+                )
                 account_state = AccountState(
                     equity=account.equity,
                     equity_at_day_start=account.equity - account.daily_pnl,
@@ -172,6 +175,7 @@ class BacktestEngine:
                     symbol=self.symbol,
                     direction=signal.direction.value,
                     stop_distance_pct=self.stop_distance_pct,
+                    position_quantity=position_quantity,
                 )
                 risk_decision = self.risk_engine.evaluate(trade_request, account_state)
 

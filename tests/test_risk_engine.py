@@ -96,6 +96,40 @@ def test_rejects_when_portfolio_exposure_exhausted():
     assert "MAX_PORTFOLIO_EXPOSURE_REACHED" in decision.reasons
 
 
+def test_allows_reducing_trade_when_portfolio_exposure_exhausted():
+    engine = HardRiskEngine(make_limits())
+    account = make_account(current_exposure_pct=Decimal("5.0"))
+    decision = engine.evaluate(
+        TradeRequest(
+            symbol="BTCUSDT",
+            direction="SHORT",
+            stop_distance_pct=Decimal("1.0"),
+            position_quantity=Decimal("0.001"),  # existing long: SHORT here reduces it
+        ),
+        account,
+    )
+    # risk_budget = 1000 * 0.10% = 1; sized = 1 / 1% = 100; capped by the 1% max position (10),
+    # not blocked by the exhausted exposure cap since this trade shrinks exposure
+    assert decision.decision == RiskDecisionType.REDUCE
+    assert decision.approved_notional == Decimal("10")
+
+
+def test_still_rejects_exposure_increasing_trade_in_same_direction_as_position():
+    engine = HardRiskEngine(make_limits())
+    account = make_account(current_exposure_pct=Decimal("5.0"))
+    decision = engine.evaluate(
+        TradeRequest(
+            symbol="BTCUSDT",
+            direction="LONG",
+            stop_distance_pct=Decimal("1.0"),
+            position_quantity=Decimal("0.001"),  # existing long: LONG here would add to it
+        ),
+        account,
+    )
+    assert decision.decision == RiskDecisionType.REJECT
+    assert "MAX_PORTFOLIO_EXPOSURE_REACHED" in decision.reasons
+
+
 def test_rejects_invalid_stop_distance():
     engine = HardRiskEngine(make_limits())
     decision = engine.evaluate(

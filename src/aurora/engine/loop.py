@@ -161,6 +161,7 @@ class TradingLoop:
         positions = self.broker.get_positions()
         exposure_notional = sum((p.quantity * p.average_entry_price for p in positions), Decimal("0"))
         exposure_pct = (exposure_notional / account.equity * Decimal("100")) if account.equity else Decimal("0")
+        position_quantity = next((p.quantity for p in positions if p.symbol == symbol), Decimal("0"))
 
         account_state = AccountState(
             equity=account.equity,
@@ -174,6 +175,7 @@ class TradingLoop:
             symbol=symbol,
             direction=signal.direction.value,
             stop_distance_pct=DEFAULT_STOP_DISTANCE_PCT,
+            position_quantity=position_quantity,
         )
 
         risk_decision = self.risk_engine.evaluate(trade_request, account_state)

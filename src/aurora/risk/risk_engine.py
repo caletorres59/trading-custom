@@ -29,6 +29,7 @@ class TradeRequest:
     symbol: str
     direction: str  # "LONG" | "SHORT"
     stop_distance_pct: Decimal  # distance to stop-loss as % of entry price
+    position_quantity: Decimal = Decimal("0")  # signed existing position for this symbol (+long/-short/0 flat)
 
 
 @dataclass(frozen=True)
@@ -85,8 +86,17 @@ class HardRiskEngine:
         if request.stop_distance_pct <= 0:
             return RiskDecision(RiskDecisionType.REJECT, Decimal("0"), ["INVALID_STOP_DISTANCE"])
 
+        # A trade that moves an existing position toward flat (SHORT against
+        # a long book, or LONG against a short book) shrinks total exposure,
+        # so it must never be blocked by a cap that exists to stop exposure
+        # from growing - otherwise a position that reaches the cap can never
+        # be reduced again once it's there.
+        is_reducing = (request.position_quantity > 0 and request.direction == "SHORT") or (
+            request.position_quantity < 0 and request.direction == "LONG"
+        )
+
         remaining_exposure_pct = self._limits.max_portfolio_exposure_pct - account.current_exposure_pct
-        if remaining_exposure_pct <= 0:
+        if not is_reducing and remaining_exposure_pct <= 0:
             return RiskDecision(RiskDecisionType.REJECT, Decimal("0"), ["MAX_PORTFOLIO_EXPOSURE_REACHED"])
 
         # Size so a full stop-out costs at most max_trade_risk_pct of equity.
@@ -94,9 +104,12 @@ class HardRiskEngine:
         sized_notional = risk_budget / (request.stop_distance_pct / Decimal("100"))
 
         max_position_notional = account.equity * (self._limits.max_position_pct / Decimal("100"))
-        max_exposure_notional = account.equity * (remaining_exposure_pct / Decimal("100"))
 
-        capped_notional = min(sized_notional, max_position_notional, max_exposure_notional)
+        if is_reducing:
+            capped_notional = min(sized_notional, max_position_notional)
+        else:
+            max_exposure_notional = account.equity * (remaining_exposure_pct / Decimal("100"))
+            capped_notional = min(sized_notional, max_position_notional, max_exposure_notional)
 
         if capped_notional <= 0:
             return RiskDecision(RiskDecisionType.REJECT, Decimal("0"), ["ZERO_SIZE_AFTER_LIMITS"])
