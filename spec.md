@@ -859,7 +859,7 @@ Este NO utiliza IA.
 
 Es determinístico.
 
-Ejemplo:
+Ejemplo original (perfil conservador, valor por defecto — ver `config/config.conservative.yaml`):
 
 ```text
 MAX_DAILY_LOSS = 0.5%
@@ -880,6 +880,26 @@ Si cualquiera se incumple:
 ```text
 REJECT
 ```
+
+**Actualización 2026-08-22 — perfil agresivo en vivo:** decisión explícita del usuario de operar con dinero simulado bajo un perfil de riesgo mucho más agresivo que el ejemplo de arriba, aceptando la posibilidad de perder toda la cuenta simulada. La estrategia (`volatility_spike`) no cambió — solo estos límites. Valores reales en vivo (`config/config.yaml`, "risk profile v2"):
+
+```text
+MAX_DAILY_LOSS = 15%
+
+MAX_TRADE_RISK = 0.5%
+
+MAX_POSITION = 10%
+
+MAX_PORTFOLIO_EXPOSURE = 50%
+
+MAX_DRAWDOWN = 30%
+
+MAX_LEVERAGE = 1x
+```
+
+Backtesteado sobre los 90 días completos de BTC-USD/ETH-USD antes de aplicarse: BTC -3.06%, ETH +0.44% en total — ningún tamaño probado (2% a 40%) llega de forma confiable a un 7% mensual en los dos activos a la vez; tamaños mayores empeoraron el resultado en vez de mejorarlo. No es una ventaja estadística validada (ver Regla 4) — es una apuesta explícita y aceptada por el usuario, no una promesa de retorno.
+
+**Bug encontrado y corregido el mismo día (commit `f24c524`):** el kill-switch de drawdown, una vez que aplanaba la cuenta a solo efectivo por debajo de su punto máximo histórico, quedaba permanentemente bloqueado — ese punto máximo nunca se podía volver a alcanzar sin una posición abierta, así que el sistema rechazaba cualquier señal nueva para siempre, no solo temporalmente. Todos los resultados de backtest reportados antes de esta corrección (incluyendo los que motivaron el primer cambio al perfil agresivo) estaban inflados por este bug — medían "cuánto ganó antes de congelarse por accidente", no una operación real y continua. Corregido reiniciando el punto máximo (`peak_equity`) al valor de la cuenta justo después de cada cierre de emergencia, para que el freno vuelva a ser temporal como estaba pensado.
 
 ---
 
