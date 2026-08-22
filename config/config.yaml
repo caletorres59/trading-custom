@@ -13,16 +13,25 @@ strategy:
   spike_multiplier: 2.0
 
 risk:
-  # Aggressive profile (2026-08-22) — deliberate, backtested departure from the
-  # original conservative defaults, per explicit user decision to chase bigger
-  # swings with simulated money. Backtested on 90d BTC-USD/ETH-USD before being
-  # applied here: +46.83%/+37.03% total return, max drawdown 23.93%/23.28%
-  # (both under the widened 30% circuit breaker), watchdog_blocks=0 (see
-  # src/aurora/risk/watchdogs.py — the 3 pre-trade checks that now run before
-  # every live order, wired into engine/loop.py and backtest/engine.py).
+  # Aggressive profile v2 (2026-08-22d) — strategy itself left untouched
+  # (still volatility_spike, window=20, spike_multiplier=2.0), only these
+  # risk numbers raised, per explicit user decision to chase ~7%/month with
+  # simulated money and accept the possibility of losing all of it.
+  # Re-backtested on the full 90d BTC-USD/ETH-USD window *after* fixing the
+  # drawdown-deadlock bug (commit f24c524) that had been silently inflating
+  # every earlier number in this file's history: at this position size, BTC
+  # total return over the full window is -3.06% and ETH is +0.44% - neither
+  # asset reliably clears 7%/month, and bigger sizes tested (15-40%) did
+  # worse on both, not better, since size just amplifies whichever month you
+  # happen to be in. The one honest data point supporting a "7% shot": BTC's
+  # best single month at this size hit +18.8% (June), so a good month *can*
+  # clear the target - a bad month (July, -24.4% at this size) can erase it
+  # just as fast. This is the closest real-data-backed attempt at the user's
+  # target, not a validated edge. Rollback: config/config.conservative.yaml
+  # + git tag pre-aggressive-baseline-2026-08-22.
   max_daily_loss_pct: 15.0
-  max_trade_risk_pct: 1.0
-  max_position_pct: 20.0
+  max_trade_risk_pct: 0.5
+  max_position_pct: 10.0
   max_portfolio_exposure_pct: 50.0
   max_drawdown_pct: 30.0
   max_leverage: 1.0
