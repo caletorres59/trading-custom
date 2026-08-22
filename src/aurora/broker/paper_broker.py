@@ -59,6 +59,17 @@ class PaperSimulatorBroker(TradingBroker):
         self._roll_day_if_needed()
         self._peak_equity = max(self._peak_equity, self._equity())
 
+    def reset_drawdown_baseline(self) -> None:
+        """Re-anchors peak_equity to the current (post-flatten) equity so a
+        max_drawdown circuit-breaker trip is a temporary brake, not a
+        permanent one. Without this, once the account is fully flattened to
+        cash below the old peak, equity can never rise again on its own (no
+        position, no new trades allowed while breached), so the old peak
+        stays forever out of reach and the kill switch would never release -
+        the account would be stuck refusing every future signal, forever.
+        Call this right after a kill-switch flatten actually executes."""
+        self._peak_equity = self._equity()
+
     def _roll_day_if_needed(self) -> None:
         today = self._clock().date()
         if today != self._day:

@@ -129,6 +129,9 @@ class TradingLoop:
                     }),
                 ))
 
+        if isinstance(self.broker, PaperSimulatorBroker):
+            self.broker.reset_drawdown_baseline()
+
     def _process_symbol(self, symbol: str) -> None:
         correlation_id = str(uuid.uuid4())
         candles = self.market_data.get_klines(symbol, self.config.timeframe)

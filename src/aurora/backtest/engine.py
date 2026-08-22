@@ -151,6 +151,7 @@ class BacktestEngine:
                         confidence=0.0,
                         risk_decision=kill_switch.decision.value,
                     ))
+                broker.reset_drawdown_baseline()
 
             signal = self.strategy.generate_signal(self.symbol, window)
 

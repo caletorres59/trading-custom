@@ -94,3 +94,26 @@ def test_average_entry_price_resets_when_flipping_through_zero():
     position = broker.get_positions()[0]
     assert position.quantity == Decimal("-2")
     assert position.average_entry_price == Decimal("300")
+
+
+def test_reset_drawdown_baseline_re_anchors_peak_to_current_equity():
+    # After a kill-switch flatten, peak_equity must drop to the post-flatten
+    # equity - otherwise drawdown_pct stays permanently pinned at whatever
+    # breached the limit, since a flattened (cash-only) account has no way
+    # to raise equity back toward the old peak on its own.
+    broker = PaperSimulatorBroker(make_state(cash=Decimal("700"), peak_equity=Decimal("1000")))
+
+    broker.reset_drawdown_baseline()
+
+    assert broker.get_account().peak_equity == Decimal("700")
+
+
+def test_reset_drawdown_baseline_allows_new_high_afterward():
+    broker = PaperSimulatorBroker(make_state(cash=Decimal("700"), peak_equity=Decimal("1000")))
+    broker.reset_drawdown_baseline()
+
+    broker.update_price("BTCUSDT", Decimal("100"))
+    broker.submit(market_order(OrderSide.BUY, "1"))  # cash 600, position worth 100 -> equity 700
+    broker.update_price("BTCUSDT", Decimal("200"))  # equity ~800 (minus the buy fee), above the reset baseline
+
+    assert broker.get_account().peak_equity == Decimal("799.900")
