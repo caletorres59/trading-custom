@@ -9,6 +9,7 @@ import pandas as pd
 from aurora.broker.base import Order, OrderSide, OrderType
 from aurora.broker.paper_broker import PaperSimulatorBroker
 from aurora.risk.risk_engine import AccountState, HardRiskEngine, RiskDecisionType, TradeRequest
+from aurora.risk.watchdogs import blocking_failure, run_watchdogs
 from aurora.strategy.base import Direction, Strategy
 
 DEFAULT_STOP_DISTANCE_PCT = Decimal("1.0")  # matches the live loop's placeholder
@@ -38,6 +39,7 @@ class BacktestResult:
     risk_rejections: int
     emergency_stops: int
     circuit_breaker_flattens: int
+    watchdog_blocks: int = 0
 
     @property
     def total_return_pct(self) -> Decimal:
@@ -111,6 +113,7 @@ class BacktestEngine:
         risk_rejections = 0
         emergency_stops = 0
         circuit_breaker_flattens = 0
+        watchdog_blocks = 0
         last_recorded_day = None
 
         for i in range(min_lookback, len(candles)):
@@ -184,7 +187,21 @@ class BacktestEngine:
                 elif risk_decision.decision == RiskDecisionType.REJECT:
                     risk_rejections += 1
                 elif risk_decision.decision in (RiskDecisionType.APPROVE, RiskDecisionType.REDUCE):
-                    quantity = (risk_decision.approved_notional / last_price).quantize(Decimal("0.00000001"))
+                    positions_notional = sum(
+                        (p.quantity * (last_price if p.symbol == self.symbol else p.average_entry_price) for p in positions),
+                        Decimal("0"),
+                    )
+                    watchdog_reports = run_watchdogs(
+                        candles=window,
+                        reported_equity=account.equity,
+                        cash=account.available_balance,
+                        positions_notional=positions_notional,
+                    )
+                    quantity = Decimal("0")
+                    if blocking_failure(watchdog_reports) is not None:
+                        watchdog_blocks += 1
+                    else:
+                        quantity = (risk_decision.approved_notional / last_price).quantize(Decimal("0.00000001"))
                     if quantity > 0:
                         side = OrderSide.BUY if signal.direction == Direction.LONG else OrderSide.SELL
                         order = Order(symbol=self.symbol, side=side, order_type=OrderType.MARKET, quantity=quantity)
@@ -222,6 +239,7 @@ class BacktestEngine:
             days=(candles["open_time"].iloc[-1] - candles["open_time"].iloc[0]).days,
             equity_curve=equity_curve,
             trades=trades,
+            watchdog_blocks=watchdog_blocks,
             total_fees=total_fees,
             max_drawdown_pct=max_dd,
             risk_rejections=risk_rejections,

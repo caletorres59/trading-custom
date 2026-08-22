@@ -60,6 +60,7 @@ def main() -> None:
     print(f"Total trades executed: {len(result.trades)}")
     print(f"Risk rejections:       {result.risk_rejections}")
     print(f"Emergency stops:       {result.emergency_stops}")
+    print(f"Watchdog blocks:       {result.watchdog_blocks}")
     print(f"Circuit breaker flattens: {result.circuit_breaker_flattens}")
     print(f"Total fees paid:       ${result.total_fees:,.2f}")
     print("=" * 60)

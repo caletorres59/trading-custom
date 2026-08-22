@@ -13,12 +13,19 @@ strategy:
   spike_multiplier: 2.0
 
 risk:
-  max_daily_loss_pct: 0.5
-  max_trade_risk_pct: 0.10
-  max_position_pct: 1.0
-  max_portfolio_exposure_pct: 5.0
-  max_drawdown_pct: 8.0
+  # Aggressive profile (2026-08-22) — deliberate, backtested departure from the
+  # original conservative defaults, per explicit user decision to chase bigger
+  # swings with simulated money. Backtested on 90d BTC-USD/ETH-USD before being
+  # applied here: +46.83%/+37.03% total return, max drawdown 23.93%/23.28%
+  # (both under the widened 30% circuit breaker), watchdog_blocks=0 (see
+  # src/aurora/risk/watchdogs.py — the 3 pre-trade checks that now run before
+  # every live order, wired into engine/loop.py and backtest/engine.py).
+  max_daily_loss_pct: 15.0
+  max_trade_risk_pct: 1.0
+  max_position_pct: 20.0
+  max_portfolio_exposure_pct: 50.0
+  max_drawdown_pct: 30.0
   max_leverage: 1.0
-  max_trades_per_day: 10
+  max_trades_per_day: 30
 
 loop_interval_seconds: 60

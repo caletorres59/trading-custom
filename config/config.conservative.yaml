@@ -1,0 +1,29 @@
+mode: PAPER
+
+symbols:
+  - BTC-USD
+
+timeframe: "5m"
+
+starting_equity: 1000 # paper money, in quote currency (USDT)
+
+strategy:
+  name: volatility_spike
+  window: 20
+  spike_multiplier: 2.0
+
+risk:
+  # Original conservative profile, live 2026-08-09 to 2026-08-22. Kept here as
+  # a ready-to-restore backup after switching config/config.yaml to the
+  # aggressive profile on 2026-08-22 (see that file's comment for the
+  # backtest numbers behind the change). To roll back:
+  #   cp config/config.conservative.yaml config/config.yaml
+  max_daily_loss_pct: 0.5
+  max_trade_risk_pct: 0.10
+  max_position_pct: 1.0
+  max_portfolio_exposure_pct: 5.0
+  max_drawdown_pct: 8.0
+  max_leverage: 1.0
+  max_trades_per_day: 10
+
+loop_interval_seconds: 60

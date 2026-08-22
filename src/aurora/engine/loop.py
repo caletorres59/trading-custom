@@ -16,6 +16,7 @@ from aurora.db.portfolio_store import save_portfolio_state
 from aurora.db.session import session_scope
 from aurora.market_data.coinbase_provider import CoinbasePublicMarketData
 from aurora.risk.risk_engine import AccountState, HardRiskEngine, RiskDecisionType, TradeRequest
+from aurora.risk.watchdogs import blocking_failure, run_watchdogs
 from aurora.strategy.base import Direction, Strategy
 
 logger = logging.getLogger("aurora.engine")
@@ -193,6 +194,40 @@ class TradingLoop:
             ))
 
         if risk_decision.decision not in (RiskDecisionType.APPROVE, RiskDecisionType.REDUCE):
+            return
+
+        positions_notional = sum(
+            (p.quantity * (last_price if p.symbol == symbol else p.average_entry_price) for p in positions),
+            Decimal("0"),
+        )
+        watchdog_reports = run_watchdogs(
+            candles=candles,
+            reported_equity=account.equity,
+            cash=account.available_balance,
+            positions_notional=positions_notional,
+        )
+        with session_scope(self.session_factory) as session:
+            for report in watchdog_reports:
+                session.add(AuditEvent(
+                    correlation_id=correlation_id,
+                    event_type="WATCHDOG_CHECK",
+                    payload=json.dumps({
+                        "name": report.name,
+                        "passed": report.passed,
+                        "blocking": report.blocking,
+                        "reason": report.reason,
+                    }),
+                ))
+
+        blocker = blocking_failure(watchdog_reports)
+        if blocker is not None:
+            logger.warning("watchdog_blocked symbol=%s name=%s reason=%s", symbol, blocker.name, blocker.reason)
+            with session_scope(self.session_factory) as session:
+                session.add(AuditEvent(
+                    correlation_id=correlation_id,
+                    event_type="WATCHDOG_BLOCKED",
+                    payload=json.dumps({"symbol": symbol, "name": blocker.name, "reason": blocker.reason}),
+                ))
             return
 
         quantity = (risk_decision.approved_notional / last_price).quantize(Decimal("0.00000001"))
