@@ -114,6 +114,7 @@ class BacktestEngine:
         emergency_stops = 0
         circuit_breaker_flattens = 0
         watchdog_blocks = 0
+        max_dd = Decimal("0")
         last_recorded_day = None
 
         for i in range(min_lookback, len(candles)):
@@ -124,6 +125,15 @@ class BacktestEngine:
             broker.update_price(self.symbol, last_price)
 
             account = broker.get_account()
+            if account.peak_equity > 0:
+                # Matches exactly what check_kill_switch below evaluates -
+                # a live, reset-aware peak (reset_drawdown_baseline() re-anchors
+                # it after every flatten), not a global all-time high. Using
+                # this instead of a once-per-day equity_curve sample is what
+                # keeps this number honest against the actual 30%-style
+                # ceiling the kill-switch enforces per episode.
+                tick_dd = (account.peak_equity - account.equity) / account.peak_equity * Decimal("100")
+                max_dd = max(max_dd, tick_dd)
             kill_switch = self.risk_engine.check_kill_switch(AccountState(
                 equity=account.equity,
                 equity_at_day_start=account.equity - account.daily_pnl,
@@ -225,13 +235,6 @@ class BacktestEngine:
                 equity_curve.append((row["open_time"], broker.get_account().equity))
 
         final_account = broker.get_account()
-        peak = self.starting_equity
-        max_dd = Decimal("0")
-        for _, equity in equity_curve:
-            peak = max(peak, equity)
-            if peak > 0:
-                dd = (peak - equity) / peak * Decimal("100")
-                max_dd = max(max_dd, dd)
 
         return BacktestResult(
             symbol=self.symbol,
