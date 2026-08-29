@@ -8,9 +8,21 @@ timeframe: "5m"
 starting_equity: 1000 # paper money, in quote currency (USDT)
 
 strategy:
+  # spike_multiplier raised 2.0 -> 3.0 on 2026-08-29 after a live week
+  # (2026-08-22 to 08-29) with the old value produced 56 trades and a net
+  # -1.17% with no clear direction. Re-backtested on the same 90d BTC-USD/
+  # ETH-USD window (v2 risk profile, position size held at 10% - a separate
+  # sweep confirmed raising position size to 15%/20% instead makes it worse,
+  # not better: BTC flips from +1.25% to -3.48%/-8.57%). At spike_multiplier
+  # 3.0, both assets came out ahead of the 2.0 baseline across every window
+  # size tested (10/15/20/30/40), in two independent runs taken days apart -
+  # a higher bar for what counts as a real volatility spike cuts ~1500
+  # trades/90d down to ~450, filtering out noise-sized "spikes" that were
+  # mostly just fee-losing coin flips. Still just backtest evidence on one
+  # historical window, not a validated edge.
   name: volatility_spike
   window: 20
-  spike_multiplier: 2.0
+  spike_multiplier: 3.0
 
 risk:
   # Aggressive profile v2 (2026-08-22d) — strategy itself left untouched
