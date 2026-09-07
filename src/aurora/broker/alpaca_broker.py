@@ -127,7 +127,13 @@ class AlpacaBroker(TradingBroker):
 
     def _refresh_anchors(self, equity: Decimal) -> None:
         today = self._clock().date()
-        if self._needs_seed and not self._seeded:
+        # peak_equity can never structurally sit far below live equity (it
+        # only ever grows), so if it does, the stored bookkeeping belongs to
+        # a different-scale account - the one-time cut-over from the $1k
+        # simulator to this $100k paper account. Re-seed instead of trusting
+        # it, so the deploy is robust even if the DB row wasn't cleared.
+        stale_scale = equity > 0 and self._peak_equity < equity / 2
+        if (self._needs_seed or stale_scale) and not self._seeded:
             self._peak_equity = equity
             self._equity_at_day_start = equity
             self._day = today
