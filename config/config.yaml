@@ -33,6 +33,18 @@ strategy:
   name: volatility_spike
   window: 20
   spike_multiplier: 3.0
+  # Regime filter (roadmap #2, live 2026-09-07). volatility_spike is a
+  # momentum strategy; in choppy markets its "spikes" mean-revert and the
+  # trades just bleed fees. er_period/er_threshold gate a spike signal on
+  # the Kaufman efficiency ratio over the last er_period bars (net move /
+  # summed absolute moves; 0 = chop, 1 = clean trend) - a spike only trades
+  # when er >= er_threshold. 90d BTC+ETH sweep (allow_short=false, real
+  # 0.25% Alpaca fee): all 20 tested combos beat the long-only no-filter
+  # baseline on BOTH assets. This combo: BTC +7.2% / ETH +12.7% vs
+  # -4.0% / -0.3%, drawdown ~5-8%, trades cut from ~420 to ~150. Still one
+  # historical window, not a validated edge (Regla 4).
+  er_period: 30
+  er_threshold: 0.35
 
 risk:
   # Aggressive profile v2 (2026-08-22d) — strategy itself left untouched
