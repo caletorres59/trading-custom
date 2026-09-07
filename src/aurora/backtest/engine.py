@@ -24,6 +24,7 @@ class TradeLogEntry:
     price: Decimal
     confidence: float
     risk_decision: str
+    symbol: str = ""
 
 
 @dataclass
