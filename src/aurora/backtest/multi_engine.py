@@ -86,12 +86,14 @@ class MultiSymbolBacktestEngine:
         symbols: list[str],
         starting_equity: Decimal,
         stop_distance_pct: Decimal = DEFAULT_STOP_DISTANCE_PCT,
+        allow_short: bool = False,
     ):
         self.strategies = strategies
         self.risk_engine = risk_engine
         self.symbols = symbols
         self.starting_equity = starting_equity
         self.stop_distance_pct = stop_distance_pct
+        self.allow_short = allow_short
 
     def run(self, candles_by_symbol: dict[str, pd.DataFrame]) -> MultiSymbolBacktestResult:
         for symbol in self.symbols:
@@ -263,10 +265,12 @@ class MultiSymbolBacktestEngine:
                     continue
 
                 quantity = (risk_decision.approved_notional / current_price).quantize(Decimal("0.00000001"))
+                side = OrderSide.BUY if signal.direction == Direction.LONG else OrderSide.SELL
+                if not self.allow_short and side == OrderSide.SELL and quantity > position_quantity:
+                    quantity = max(position_quantity, Decimal("0"))
                 if quantity <= 0:
                     continue
 
-                side = OrderSide.BUY if signal.direction == Direction.LONG else OrderSide.SELL
                 order = Order(symbol=symbol, side=side, order_type=OrderType.MARKET, quantity=quantity)
                 result = broker.submit(order)
                 total_fees += record_fill(

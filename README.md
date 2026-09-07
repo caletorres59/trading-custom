@@ -25,8 +25,9 @@ El archivo del workflow solo declara `workflow_dispatch: {}`.
 
 - Dispara manualmente desde la pestaña **Actions** del repo con "Run workflow"
   si quieres una corrida inmediata.
-- Las credenciales de conexión a la base viven en el secret `DATABASE_URL`
-  del repo (Settings → Secrets and variables → Actions) — nunca en el código.
+- Las credenciales viven en secrets del repo (Settings → Secrets and
+  variables → Actions) — nunca en el código: `DATABASE_URL` (Postgres) y
+  `ALPACA_API_KEY_ID` / `ALPACA_API_SECRET_KEY` (cuenta paper de Alpaca).
 - El cron job y el token viven en Supabase, no en GitHub — para revisarlos:
   SQL Editor → `select * from cron.job;` / `cron.job_run_details`.
 
@@ -39,10 +40,15 @@ El archivo del workflow solo declara `workflow_dispatch: {}`.
 - `strategy`: una estrategia base — cruce de medias móviles (SMA).
 - `risk`: motor de riesgo duro, determinístico, con límites porcentuales
   (pérdida diaria máxima, drawdown máximo, exposición máxima, trades/día).
-- `broker`: simulador de paper trading (fees incluidos), con su estado
-  (caja, posiciones, equity pico, trades del día) persistido en la base de
-  datos — así una ejecución "recuerda" lo que hizo la anterior, aunque cada
-  corrida de GitHub Actions sea un proceso nuevo que se apaga al terminar.
+- `broker`: **ejecución en vivo contra Alpaca** (`AlpacaBroker`, cuenta
+  paper — dinero simulado, infraestructura real). Órdenes, caja, posiciones
+  y equity son el estado real de Alpaca. Solo el `peak_equity` con reinicio
+  y el ancla de equity de inicio-de-día (que necesita el Risk Engine y que
+  Alpaca no expone) se guardan en `portfolio_state`, junto con un espejo de
+  la caja/posiciones para el dashboard. Cripto spot no se puede poner en
+  corto: una señal SHORT solo reduce un largo existente (`execution.allow_short`).
+  El `PaperSimulatorBroker` (simulador con fills propios) ahora solo lo usa
+  el backtest.
 - `db`: cada señal, decisión de riesgo, orden y evento de auditoría queda
   guardado con un `correlation_id` común, para poder responder "¿por qué se
   ejecutó esta operación?". `equity_history` guarda un snapshot por

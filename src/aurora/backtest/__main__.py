@@ -34,6 +34,7 @@ def _run_single(config: AppConfig, symbol: str, days: int) -> None:
         risk_engine=HardRiskEngine(config.risk),
         symbol=symbol,
         starting_equity=config.starting_equity,
+        allow_short=config.allow_short,
     )
     result = engine.run(candles)
 
@@ -72,6 +73,7 @@ def _run_multi(config: AppConfig, symbols: list[str], days: int) -> None:
         risk_engine=HardRiskEngine(config.risk),
         symbols=symbols,
         starting_equity=config.starting_equity,
+        allow_short=config.allow_short,
     )
     result = engine.run(candles_by_symbol)
 

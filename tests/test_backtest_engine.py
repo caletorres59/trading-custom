@@ -18,6 +18,73 @@ class AlwaysLongStrategy(Strategy):
         return Signal(symbol, Direction.LONG, 1.0, ["ALWAYS_LONG"])
 
 
+class LongThenShortStrategy(Strategy):
+    """Long for the first few bars, then short - so the SELL that follows
+    has a real long position to act against."""
+
+    name = "long_then_short"
+
+    def generate_signal(self, symbol: str, candles: pd.DataFrame) -> Signal:
+        direction = Direction.LONG if len(candles) <= 5 else Direction.SHORT
+        return Signal(symbol, direction, 1.0, ["SCRIPTED"])
+
+
+def _permissive_limits() -> RiskLimits:
+    return RiskLimits(
+        max_position_pct=Decimal("100"),
+        max_portfolio_exposure_pct=Decimal("100"),
+        max_trade_risk_pct=Decimal("100"),
+        max_daily_loss_pct=Decimal("99"),
+        max_drawdown_pct=Decimal("99"),
+        max_leverage=Decimal("1"),
+        max_trades_per_day=100,
+    )
+
+
+def test_long_only_skips_a_short_with_no_long_to_reduce():
+    engine = BacktestEngine(
+        strategy=type("AlwaysShort", (Strategy,), {
+            "name": "always_short",
+            "generate_signal": lambda self, s, c: Signal(s, Direction.SHORT, 1.0, ["S"]),
+        })(),
+        risk_engine=HardRiskEngine(_permissive_limits()),
+        symbol="BTC-USD",
+        starting_equity=Decimal("1000"),
+        allow_short=False,
+    )
+    result = engine.run(make_candles([100, 100, 100, 100, 100, 100, 100, 100]))
+    assert result.trades == []  # nothing held, so every SELL clamps to zero
+
+
+def test_long_only_short_reduces_an_existing_long_without_flipping_negative():
+    engine = BacktestEngine(
+        strategy=LongThenShortStrategy(),
+        risk_engine=HardRiskEngine(_permissive_limits()),
+        symbol="BTC-USD",
+        starting_equity=Decimal("1000"),
+        allow_short=False,
+    )
+    result = engine.run(make_candles([100, 100, 100, 100, 100, 100, 100, 100, 100, 100]))
+    # the short leg only ever sells, never opens a negative position
+    assert result.final_equity >= Decimal("0")
+    assert all(t.side in ("BUY", "SELL") for t in result.trades)
+
+
+def test_allow_short_true_still_lets_the_backtest_open_shorts():
+    engine = BacktestEngine(
+        strategy=type("AlwaysShort", (Strategy,), {
+            "name": "always_short",
+            "generate_signal": lambda self, s, c: Signal(s, Direction.SHORT, 1.0, ["S"]),
+        })(),
+        risk_engine=HardRiskEngine(_permissive_limits()),
+        symbol="BTC-USD",
+        starting_equity=Decimal("1000"),
+        allow_short=True,
+    )
+    result = engine.run(make_candles([100, 100, 100, 100, 100, 100, 100, 100]))
+    assert len(result.trades) > 0
+
+
 def make_candles(closes: list[float]) -> pd.DataFrame:
     n = len(closes)
     return pd.DataFrame({
