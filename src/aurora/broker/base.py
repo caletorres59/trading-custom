@@ -83,3 +83,16 @@ class TradingBroker(ABC):
 
     @abstractmethod
     def get_positions(self) -> list[Position]: ...
+
+    @abstractmethod
+    def reset_drawdown_baseline(self) -> None:
+        """Re-anchor peak_equity to current equity after a kill-switch
+        flatten, so a max-drawdown trip releases once equity recovers
+        instead of trapping the account forever."""
+        ...
+
+    @abstractmethod
+    def export_state(self) -> dict:
+        """The account bookkeeping to persist between ephemeral runs
+        (one process per scheduled execution)."""
+        ...

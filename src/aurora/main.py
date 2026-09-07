@@ -5,7 +5,7 @@ import logging
 
 from dotenv import load_dotenv
 
-from aurora.broker.paper_broker import PaperSimulatorBroker
+from aurora.broker.alpaca_broker import AlpacaBroker
 from aurora.config import AppConfig, load_config
 from aurora.db.portfolio_store import load_portfolio_state
 from aurora.db.session import init_db
@@ -40,8 +40,14 @@ def main() -> None:
     config = load_config(args.config)
     session_factory = init_db(config.database_url)
 
-    portfolio_state = load_portfolio_state(session_factory, config.starting_equity)
-    broker = PaperSimulatorBroker(state=portfolio_state)
+    bookkeeping, needs_seed = load_portfolio_state(session_factory, config.starting_equity)
+    broker = AlpacaBroker(
+        key_id=config.alpaca_api_key_id,
+        secret_key=config.alpaca_api_secret_key,
+        base_url=config.alpaca_base_url,
+        bookkeeping=bookkeeping,
+        needs_seed=needs_seed,
+    )
     market_data = CoinbasePublicMarketData()
     strategy = build_strategy(config)
     risk_engine = HardRiskEngine(config.risk)

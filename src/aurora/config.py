@@ -35,8 +35,16 @@ class AppConfig:
     loop_interval_seconds: int
     starting_equity: Decimal
     database_url: str
-    binance_api_key: str | None
-    binance_api_secret: str | None
+    allow_short: bool
+    alpaca_api_key_id: str | None
+    alpaca_api_secret_key: str | None
+    alpaca_base_url: str
+
+
+# Alpaca serves paper and live trading from separate hosts; market-data
+# hosts are the same for both and not needed here (candles come from Coinbase).
+_ALPACA_PAPER_URL = "https://paper-api.alpaca.markets"
+_ALPACA_LIVE_URL = "https://api.alpaca.markets"
 
 
 def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
@@ -60,8 +68,10 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
         params={k: v for k, v in strategy_raw.items() if k != "name"},
     )
 
+    mode = raw.get("mode", "PAPER")
+
     return AppConfig(
-        mode=raw.get("mode", "PAPER"),
+        mode=mode,
         symbols=raw["symbols"],
         timeframe=raw["timeframe"],
         strategy=strategy,
@@ -69,6 +79,8 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
         loop_interval_seconds=int(raw.get("loop_interval_seconds", 60)),
         starting_equity=Decimal(str(raw.get("starting_equity", "1000"))),
         database_url=os.environ.get("DATABASE_URL", "sqlite:///./aurora.db"),
-        binance_api_key=os.environ.get("BINANCE_TESTNET_API_KEY") or None,
-        binance_api_secret=os.environ.get("BINANCE_TESTNET_API_SECRET") or None,
+        allow_short=bool(raw.get("execution", {}).get("allow_short", False)),
+        alpaca_api_key_id=os.environ.get("ALPACA_API_KEY_ID") or None,
+        alpaca_api_secret_key=os.environ.get("ALPACA_API_SECRET_KEY") or None,
+        alpaca_base_url=_ALPACA_LIVE_URL if mode == "LIVE" else _ALPACA_PAPER_URL,
     )

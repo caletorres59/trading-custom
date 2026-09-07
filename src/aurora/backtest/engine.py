@@ -85,12 +85,17 @@ class BacktestEngine:
         symbol: str,
         starting_equity: Decimal,
         stop_distance_pct: Decimal = DEFAULT_STOP_DISTANCE_PCT,
+        allow_short: bool = False,
     ):
         self.strategy = strategy
         self.risk_engine = risk_engine
         self.symbol = symbol
         self.starting_equity = starting_equity
         self.stop_distance_pct = stop_distance_pct
+        # Spot venues (and the live Alpaca adapter) can't hold a short crypto
+        # position, so by default a SELL is clamped to the held quantity here
+        # too - keeps backtest behavior identical to live.
+        self.allow_short = allow_short
 
     def run(self, candles: pd.DataFrame) -> BacktestResult:
         min_lookback = getattr(self.strategy, "slow_period", 1) + 1
@@ -214,8 +219,10 @@ class BacktestEngine:
                         watchdog_blocks += 1
                     else:
                         quantity = (risk_decision.approved_notional / last_price).quantize(Decimal("0.00000001"))
+                    side = OrderSide.BUY if signal.direction == Direction.LONG else OrderSide.SELL
+                    if not self.allow_short and side == OrderSide.SELL and quantity > position_quantity:
+                        quantity = max(position_quantity, Decimal("0"))
                     if quantity > 0:
-                        side = OrderSide.BUY if signal.direction == Direction.LONG else OrderSide.SELL
                         order = Order(symbol=self.symbol, side=side, order_type=OrderType.MARKET, quantity=quantity)
                         result = broker.submit(order)
                         fee = result.filled_quantity * (result.average_fill_price or Decimal("0")) * Decimal("0.001")

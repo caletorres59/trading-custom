@@ -9,7 +9,6 @@ from decimal import Decimal
 from sqlalchemy.orm import sessionmaker
 
 from aurora.broker.base import Order, OrderSide, OrderType, TradingBroker
-from aurora.broker.paper_broker import PaperSimulatorBroker
 from aurora.config import AppConfig
 from aurora.db.models import AuditEvent, EquitySnapshot, OrderRecord, RiskDecisionRecord, SignalRecord
 from aurora.db.portfolio_store import save_portfolio_state
@@ -49,9 +48,8 @@ class TradingLoop:
     def run_once(self) -> None:
         for symbol in self.config.symbols:
             self._process_symbol(symbol)
-        if isinstance(self.broker, PaperSimulatorBroker):
-            save_portfolio_state(self.session_factory, self.broker.export_state())
-            self._record_equity_snapshot()
+        save_portfolio_state(self.session_factory, self.broker.export_state())
+        self._record_equity_snapshot()
 
     def _record_equity_snapshot(self) -> None:
         account = self.broker.get_account()
@@ -129,16 +127,12 @@ class TradingLoop:
                     }),
                 ))
 
-        if isinstance(self.broker, PaperSimulatorBroker):
-            self.broker.reset_drawdown_baseline()
+        self.broker.reset_drawdown_baseline()
 
     def _process_symbol(self, symbol: str) -> None:
         correlation_id = str(uuid.uuid4())
         candles = self.market_data.get_klines(symbol, self.config.timeframe)
         last_price = Decimal(str(candles["close"].iloc[-1]))
-
-        if isinstance(self.broker, PaperSimulatorBroker):
-            self.broker.update_price(symbol, last_price)
 
         self._enforce_kill_switch(symbol, correlation_id)
 
@@ -238,8 +232,28 @@ class TradingLoop:
             return
 
         side = OrderSide.BUY if signal.direction == Direction.LONG else OrderSide.SELL
+
+        if not self.config.allow_short and side == OrderSide.SELL:
+            # Spot crypto can't be shorted (Alpaca). A SELL can only reduce
+            # an existing long; a SELL with nothing to reduce is a no-op.
+            # Clamp to the exact held quantity - never re-quantize here, or
+            # rounding up by a hair over the balance gets the order rejected.
+            held = max(position_quantity, Decimal("0"))
+            if quantity > held:
+                quantity = held
+            if quantity <= 0:
+                logger.info("short_skipped_spot_long_only symbol=%s", symbol)
+                with session_scope(self.session_factory) as session:
+                    session.add(AuditEvent(
+                        correlation_id=correlation_id,
+                        event_type="SHORT_SKIPPED_SPOT_LONG_ONLY",
+                        payload=json.dumps({"symbol": symbol, "confidence": signal.confidence}),
+                    ))
+                return
+
         order = Order(symbol=symbol, side=side, order_type=OrderType.MARKET, quantity=quantity)
         result = self.broker.submit(order)
+        executed = result.filled_quantity > 0
 
         with session_scope(self.session_factory) as session:
             session.add(OrderRecord(
@@ -253,7 +267,7 @@ class TradingLoop:
             ))
             session.add(AuditEvent(
                 correlation_id=correlation_id,
-                event_type="TRADE_EXECUTED",
+                event_type="TRADE_EXECUTED" if executed else "ORDER_NOT_FILLED",
                 payload=json.dumps({
                     "symbol": symbol,
                     "direction": signal.direction.value,
@@ -261,5 +275,10 @@ class TradingLoop:
                     "risk_decision": risk_decision.decision.value,
                     "quantity": str(result.filled_quantity),
                     "price": str(result.average_fill_price),
+                    "status": result.status.value,
                 }),
             ))
+        if not executed:
+            logger.warning(
+                "order_not_filled symbol=%s side=%s status=%s", symbol, side.value, result.status.value
+            )

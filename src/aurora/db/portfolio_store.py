@@ -12,7 +12,12 @@ from aurora.db.session import session_scope
 STATE_ID = "default"  # single portfolio for this MVP; one row is enough
 
 
-def load_portfolio_state(session_factory: sessionmaker, starting_equity: Decimal) -> dict:
+def load_portfolio_state(
+    session_factory: sessionmaker, starting_equity: Decimal
+) -> tuple[dict, bool]:
+    """Returns ``(state, needs_seed)``. ``needs_seed`` is True when no row
+    existed yet, so a live broker knows to anchor its peak / day-start
+    equity to the real account balance instead of the config placeholder."""
     with session_scope(session_factory) as session:
         row = session.get(PortfolioState, STATE_ID)
         if row is None:
@@ -23,7 +28,7 @@ def load_portfolio_state(session_factory: sessionmaker, starting_equity: Decimal
                 "state_day": date.today().isoformat(),
                 "trades_today": 0,
                 "positions": {},
-            }
+            }, True
         return {
             "cash": row.cash,
             "peak_equity": row.peak_equity,
@@ -31,7 +36,7 @@ def load_portfolio_state(session_factory: sessionmaker, starting_equity: Decimal
             "state_day": row.state_day,
             "trades_today": row.trades_today,
             "positions": json.loads(row.positions_json),
-        }
+        }, False
 
 
 def save_portfolio_state(session_factory: sessionmaker, state: dict) -> None:

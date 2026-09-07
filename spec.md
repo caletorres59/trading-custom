@@ -905,6 +905,15 @@ Backtesteado sobre los 90 días completos de BTC-USD/ETH-USD antes de aplicarse:
 
 **Actualización 2026-08-29 — ajuste de estrategia (`spike_multiplier` 2.0 → 3.0):** tras una semana en vivo (2026-08-22 a 08-29) con `spike_multiplier: 2.0` — 56 operaciones, -1.17% neto, sin tendencia clara — se re-backtesteó `volatility_spike` sobre la misma ventana de 90 días (perfil de riesgo v2 sin cambios, tamaño de posición en 10%). `spike_multiplier: 3.0` superó a 2.0 en BTC y ETH simultáneamente en los 5 tamaños de ventana probados (10/15/20/30/40), en dos corridas independientes con datos de días distintos — filtra velas "grandes pero normales" y solo opera ante movimientos verdaderamente atípicos, bajando de ~1,530-1,600 operaciones a ~420-500 en la ventana de 90 días. Se probó también subir el tamaño de posición a 15%/20% junto con este cambio de estrategia: empeora el resultado en vez de mejorarlo (BTC pasa de +1.25% a -3.48%/-8.57% con el mismo número de operaciones), así que el tamaño de posición se mantuvo en 10%. Sigue siendo evidencia de un solo backtest histórico, no una ventaja validada (ver Regla 4).
 
+**Actualización 2026-09-07 — ejecución en vivo migrada a Alpaca (paper), fin del simulador propio en producción:** el loop en vivo dejó de usar `PaperSimulatorBroker` (fills inventados por nosotros) y ahora opera contra la **plataforma de paper trading de Alpaca** vía `AlpacaBroker` (nuevo, `src/aurora/broker/alpaca_broker.py`) — infraestructura real de un bróker regulado en EE.UU., libro de órdenes real, latencia real, dinero simulado ($100k). Cuenta paper `PA3OA821KKKD`. Se eligió Alpaca porque es lo único que combina: alcanzable desde las IPs de GitHub Actions (Bybit y Binance están geo-bloqueados, igual que motivó salir de Binance para los datos), soporte de cripto spot, cuenta de práctica sin KYC completo, y ser un bróker regulado. Las velas siguen viniendo de Coinbase (el volumen de los datos cripto de Alpaca es muy fino); Alpaca es solo ejecución + cuenta + posiciones.
+
+- **`TradingBroker` es la única interfaz** (sección 18): `AlpacaBroker` es la implementación `CryptoBroker`. `PaperSimulatorBroker` se conserva pero **solo lo usa el backtest** (un backtest necesita un simulador por definición).
+- **`peak_equity` y el ancla de equity de inicio-de-día-UTC** (que necesita el HardRiskEngine para los kill-switch de drawdown y pérdida diaria) los mantiene `AlpacaBroker` y se persisten en `portfolio_state` — Alpaca no los expone. Todo lo demás (efectivo, posiciones, equity) se lee en vivo de Alpaca en cada llamada. El resto de `portfolio_state` (`cash`, `positions_json`) es un espejo de Alpaca para que el dashboard siga funcionando sin cambios.
+- **Cripto spot no se puede poner en corto en Alpaca.** Nueva opción de config `execution.allow_short` (por defecto `false`): con corto deshabilitado, una señal SHORT solo puede *reducir un largo existente* (un SELL limitado a la cantidad en cartera); una señal SHORT sin nada que reducir es un no-op (evento de auditoría `SHORT_SKIPPED_SPOT_LONG_ONLY`). Esto vuelve a `volatility_spike` **efectivamente solo-largo en vivo** — un cambio real de comportamiento. Los engines de backtest (`engine.py`, `multi_engine.py`) honran el mismo flag para que sus números sigan siendo comparables con lo que hace la app en vivo.
+- **Fees reales de Alpaca (~0.25% cripto)**, más altas que el 0.1% del simulador — más realista/conservador.
+- `starting_equity` en `config/config.yaml` subió a 100000 para coincidir con la cuenta paper. El equity_history del dashboard muestra un escalón único de ~$997 a ~$100k en el momento de la migración (esperado).
+- Credenciales: `ALPACA_API_KEY_ID` / `ALPACA_API_SECRET_KEY` como secrets de GitHub Actions (permisos de solo-trading, nunca retiros — sección 28). `mode: PAPER` → endpoint paper; `mode: LIVE` → endpoint real (sigue siendo un switch manual y humano — Regla 3 / sección 27).
+
 ---
 
 # 14. SIGNAL ENGINE
@@ -1059,8 +1068,8 @@ public interface TradingBroker {
 Implementaciones independientes:
 
 ```text
-PaperBroker
-CryptoBroker
+PaperBroker      -> PaperSimulatorBroker (solo backtest desde 2026-09-07)
+CryptoBroker     -> AlpacaBroker (ejecución en vivo, paper o real según base_url)
 StockBroker
 FutureBroker
 ```

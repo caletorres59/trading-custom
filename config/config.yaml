@@ -1,11 +1,21 @@
-mode: PAPER
+mode: PAPER  # PAPER -> Alpaca paper endpoint; LIVE -> Alpaca live (manual switch only)
 
 symbols:
   - BTC-USD
 
 timeframe: "5m"
 
-starting_equity: 1000 # paper money, in quote currency (USDT)
+# Matches the Alpaca paper account's balance. Execution, account and
+# positions are now Alpaca's real (paper) state via AlpacaBroker - the
+# local PaperSimulatorBroker is only used by the backtest engine now.
+starting_equity: 100000
+
+execution:
+  # Spot crypto can't be shorted on Alpaca. With allow_short false, a SHORT
+  # signal can only reduce an existing long (a SELL clamped to the held
+  # quantity); a SHORT with nothing to reduce is a no-op. The backtest
+  # engines honor the same flag so their numbers stay comparable to live.
+  allow_short: false
 
 strategy:
   # spike_multiplier raised 2.0 -> 3.0 on 2026-08-29 after a live week

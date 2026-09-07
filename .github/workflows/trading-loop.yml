@@ -25,4 +25,6 @@ jobs:
       - name: Run one trading loop iteration
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ALPACA_API_KEY_ID: ${{ secrets.ALPACA_API_KEY_ID }}
+          ALPACA_API_SECRET_KEY: ${{ secrets.ALPACA_API_SECRET_KEY }}
         run: python -m aurora.main --once
