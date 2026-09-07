@@ -159,6 +159,19 @@ def test_first_run_seeds_anchors_from_live_equity():
     assert snap.daily_pnl == Decimal("0")
 
 
+def test_stale_scale_bookkeeping_reseeds_at_cutover():
+    # simulator-era row ($1k scale) against the new $100k paper account
+    session = FakeSession()
+    session.account = {"equity": "100000", "cash": "100000"}
+    broker = make_broker(session, needs_seed=False, peak_equity=Decimal("1014.61"),
+                         equity_at_day_start=Decimal("995.01"))
+
+    snap = broker.get_account()
+
+    assert snap.peak_equity == Decimal("100000")
+    assert snap.daily_pnl == Decimal("0")
+
+
 def test_stored_anchors_are_kept_when_not_seeding():
     session = FakeSession()
     session.account = {"equity": "100000", "cash": "100000"}
