@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  CartesianGrid,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -62,15 +63,20 @@ const MAX_FEED_ROWS = 20;
 const MAX_CHART_POINTS = 200;
 
 function money(value: string | number | undefined) {
-  if (value === undefined) return "—";
+  if (value === undefined || value === null || value === "") return "—";
   return `$${Number(value).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
 }
 
+function compactMoney(value: number) {
+  if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(1)}k`;
+  return `$${value.toFixed(0)}`;
+}
+
 function timeOnly(iso: string) {
-  return new Date(iso).toLocaleTimeString("en-US", { hour12: false });
+  return new Date(iso).toLocaleTimeString("es", { hour12: false });
 }
 
 function directionColor(direction: Signal["direction"]) {
@@ -90,19 +96,44 @@ function StatTile({
   label,
   value,
   accent,
+  hint,
 }: {
   label: string;
   value: string;
   accent?: string;
+  hint?: string;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-      <div className="text-xs uppercase tracking-wide text-zinc-500">
+    <div className="flex min-w-0 flex-col rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+      <div className="truncate text-[11px] uppercase tracking-wider text-zinc-500">
         {label}
       </div>
-      <div className={`mt-1 text-2xl font-mono ${accent ?? "text-zinc-100"}`}>
+      <div
+        className={`mt-1.5 truncate font-mono text-base tabular-nums tracking-tight sm:text-lg ${
+          accent ?? "text-zinc-100"
+        }`}
+        title={value}
+      >
         {value}
       </div>
+      {hint ? (
+        <div className="mt-0.5 truncate text-[11px] text-zinc-600">{hint}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function Panel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
+      <h2 className="mb-3 text-sm font-medium text-zinc-400">{title}</h2>
+      <div className="space-y-2">{children}</div>
     </div>
   );
 }
@@ -224,36 +255,67 @@ export default function DashboardPage() {
   }, []);
 
   const latestEquity = equityHistory[equityHistory.length - 1];
-  const chartData = equityHistory.map((snapshot) => ({
-    time: timeOnly(snapshot.created_at),
-    equity: Number(snapshot.equity),
-  }));
+
+  // The series still carries a tail from the retired $1k simulator account;
+  // drop anything on a wildly different scale from the latest reading so the
+  // chart auto-focuses on the live account instead of squashing it to a line
+  // at the top of a 0–100k axis. Self-heals as the old points age out.
+  const chartData = useMemo(() => {
+    const latest = latestEquity ? Number(latestEquity.equity) : undefined;
+    return equityHistory
+      .filter(
+        (s) => latest === undefined || Number(s.equity) > latest * 0.5,
+      )
+      .map((snapshot) => ({
+        time: timeOnly(snapshot.created_at),
+        equity: Number(snapshot.equity),
+      }));
+  }, [equityHistory, latestEquity]);
+
+  const yDomain = useMemo<[number, number]>(() => {
+    if (chartData.length === 0) return [0, 1];
+    const values = chartData.map((d) => d.equity);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const pad = Math.max((max - min) * 0.2, max * 0.0015, 1);
+    return [min - pad, max + pad];
+  }, [chartData]);
+
+  const drawdown = latestEquity ? Number(latestEquity.drawdown_pct) : null;
+  const dailyPnl = latestEquity ? Number(latestEquity.daily_pnl) : null;
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100">
-      <header className="border-b border-zinc-800 px-6 py-4">
-        <div className="mx-auto flex max-w-6xl items-center justify-between">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      <header className="border-b border-zinc-800 bg-zinc-950/80 px-6 py-4 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <div>
             <h1 className="text-lg font-semibold">Aurora Trading — Monitor</h1>
             <p className="text-xs text-zinc-500">
               Paper trading · dinero simulado
             </p>
           </div>
-          <div className="flex items-center gap-2 text-xs">
-            <span
-              className={`h-2 w-2 rounded-full ${connected ? "bg-emerald-400" : "bg-zinc-600"}`}
-            />
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <span className="relative flex h-2 w-2">
+              {connected ? (
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+              ) : null}
+              <span
+                className={`relative inline-flex h-2 w-2 rounded-full ${
+                  connected ? "bg-emerald-400" : "bg-zinc-600"
+                }`}
+              />
+            </span>
             {connected ? "En vivo" : "Conectando…"}
           </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl space-y-6 px-6 py-6">
+      <main className="mx-auto max-w-7xl space-y-6 px-6 py-8">
         {loading ? (
           <p className="text-zinc-500">Cargando datos…</p>
         ) : (
           <>
-            <section className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-7">
+            <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7">
               <StatTile
                 label="Ejecuciones"
                 value={executionCount === null ? "—" : String(executionCount)}
@@ -266,24 +328,20 @@ export default function DashboardPage() {
               />
               <StatTile
                 label="Drawdown"
-                value={
-                  latestEquity
-                    ? `${Number(latestEquity.drawdown_pct).toFixed(2)}%`
-                    : "—"
-                }
+                value={drawdown === null ? "—" : `${drawdown.toFixed(2)}%`}
                 accent={
-                  latestEquity && Number(latestEquity.drawdown_pct) > 0
-                    ? "text-amber-400"
-                    : undefined
+                  drawdown && drawdown > 0 ? "text-amber-400" : "text-zinc-100"
                 }
               />
               <StatTile
                 label="Daily PnL"
                 value={money(latestEquity?.daily_pnl)}
                 accent={
-                  latestEquity && Number(latestEquity.daily_pnl) < 0
-                    ? "text-rose-400"
-                    : "text-emerald-400"
+                  dailyPnl === null || dailyPnl === 0
+                    ? "text-zinc-100"
+                    : dailyPnl < 0
+                      ? "text-rose-400"
+                      : "text-emerald-400"
                 }
               />
               <StatTile
@@ -292,32 +350,46 @@ export default function DashboardPage() {
               />
             </section>
 
-            <section className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
+            <section className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
               <h2 className="mb-3 text-sm font-medium text-zinc-400">
                 Equity a través del tiempo
               </h2>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
+                  <LineChart
+                    data={chartData}
+                    margin={{ top: 8, right: 12, bottom: 0, left: 0 }}
+                  >
+                    <CartesianGrid
+                      stroke="#27272a"
+                      strokeDasharray="3 3"
+                      vertical={false}
+                    />
                     <XAxis
                       dataKey="time"
                       stroke="#52525b"
                       tick={{ fontSize: 11 }}
-                      minTickGap={40}
+                      tickLine={false}
+                      minTickGap={48}
                     />
                     <YAxis
                       stroke="#52525b"
                       tick={{ fontSize: 11 }}
-                      domain={["auto", "auto"]}
-                      width={70}
+                      tickLine={false}
+                      axisLine={false}
+                      domain={yDomain}
+                      width={56}
+                      tickFormatter={(v) => compactMoney(Number(v))}
                     />
                     <Tooltip
                       contentStyle={{
                         background: "#09090b",
                         border: "1px solid #27272a",
+                        borderRadius: 8,
                         fontSize: 12,
                       }}
-                      formatter={(value) => money(Number(value))}
+                      labelStyle={{ color: "#a1a1aa" }}
+                      formatter={(value) => [money(Number(value)), "Equity"]}
                     />
                     <Line
                       type="monotone"
@@ -325,6 +397,7 @@ export default function DashboardPage() {
                       stroke="#34d399"
                       dot={false}
                       strokeWidth={2}
+                      isAnimationActive={false}
                     />
                   </LineChart>
                 </ResponsiveContainer>
@@ -332,113 +405,100 @@ export default function DashboardPage() {
             </section>
 
             <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <h2 className="mb-3 text-sm font-medium text-zinc-400">
-                  Señales recientes
-                </h2>
-                <div className="space-y-2">
-                  {signals.length === 0 && (
-                    <p className="text-xs text-zinc-600">Sin señales aún.</p>
-                  )}
-                  {signals.map((signal) => (
-                    <div
-                      key={signal.id}
-                      className="flex items-center justify-between rounded border border-zinc-900 bg-black px-3 py-2 text-xs"
-                    >
-                      <div className="flex flex-col">
-                        <span className="font-mono">{signal.symbol}</span>
-                        <span className="text-zinc-600">
-                          {timeOnly(signal.created_at)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-zinc-500">
-                          {(signal.confidence * 100).toFixed(0)}%
-                        </span>
-                        <span
-                          className={`rounded px-2 py-1 font-mono ${directionColor(signal.direction)}`}
-                        >
-                          {signal.direction}
-                        </span>
-                      </div>
+              <Panel title="Señales recientes">
+                {signals.length === 0 && (
+                  <p className="text-xs text-zinc-600">Sin señales aún.</p>
+                )}
+                {signals.map((signal) => (
+                  <div
+                    key={signal.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800/70 bg-zinc-950/60 px-3 py-2 text-xs"
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="font-mono">{signal.symbol}</span>
+                      <span className="text-zinc-600">
+                        {timeOnly(signal.created_at)}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className="text-zinc-500">
+                        {(signal.confidence * 100).toFixed(0)}%
+                      </span>
+                      <span
+                        className={`rounded px-2 py-1 font-mono ${directionColor(
+                          signal.direction,
+                        )}`}
+                      >
+                        {signal.direction}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </Panel>
 
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <h2 className="mb-3 text-sm font-medium text-zinc-400">
-                  Decisiones de riesgo
-                </h2>
-                <div className="space-y-2">
-                  {riskDecisions.length === 0 && (
-                    <p className="text-xs text-zinc-600">
-                      Sin decisiones aún.
-                    </p>
-                  )}
-                  {riskDecisions.map((decision) => (
-                    <div
-                      key={decision.id}
-                      className="rounded border border-zinc-900 bg-black px-3 py-2 text-xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-600">
-                          {timeOnly(decision.created_at)}
-                        </span>
-                        <span
-                          className={`rounded px-2 py-1 font-mono ${decisionColor(decision.decision)}`}
-                        >
-                          {decision.decision}
-                        </span>
-                      </div>
-                      <div className="mt-1 truncate text-zinc-500">
-                        {JSON.parse(decision.reasons || "[]").join(", ")}
-                      </div>
+              <Panel title="Decisiones de riesgo">
+                {riskDecisions.length === 0 && (
+                  <p className="text-xs text-zinc-600">Sin decisiones aún.</p>
+                )}
+                {riskDecisions.map((decision) => (
+                  <div
+                    key={decision.id}
+                    className="rounded-lg border border-zinc-800/70 bg-zinc-950/60 px-3 py-2 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-zinc-600">
+                        {timeOnly(decision.created_at)}
+                      </span>
+                      <span
+                        className={`rounded px-2 py-1 font-mono ${decisionColor(
+                          decision.decision,
+                        )}`}
+                      >
+                        {decision.decision}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div className="mt-1 truncate text-zinc-500">
+                      {JSON.parse(decision.reasons || "[]").join(", ")}
+                    </div>
+                  </div>
+                ))}
+              </Panel>
 
-              <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-4">
-                <h2 className="mb-3 text-sm font-medium text-zinc-400">
-                  Órdenes ejecutadas
-                </h2>
-                <div className="space-y-2">
-                  {orders.length === 0 && (
-                    <p className="text-xs text-zinc-600">
-                      Sin órdenes todavía — el sistema solo opera cuando hay
-                      evidencia suficiente.
-                    </p>
-                  )}
-                  {orders.map((order) => (
-                    <div
-                      key={order.id}
-                      className="flex items-center justify-between rounded border border-zinc-900 bg-black px-3 py-2 text-xs"
-                    >
-                      <div className="flex flex-col">
-                        <span className="font-mono">{order.symbol}</span>
-                        <span className="text-zinc-600">
-                          {timeOnly(order.created_at)}
-                        </span>
-                      </div>
-                      <div className="flex flex-col items-end">
-                        <span
-                          className={
-                            order.side === "BUY"
-                              ? "text-emerald-400"
-                              : "text-rose-400"
-                          }
-                        >
-                          {order.side} {Number(order.quantity).toFixed(6)}
-                        </span>
-                        <span className="text-zinc-500">
-                          @ {money(order.fill_price)}
-                        </span>
-                      </div>
+              <Panel title="Órdenes ejecutadas">
+                {orders.length === 0 && (
+                  <p className="text-xs text-zinc-600">
+                    Sin órdenes todavía — el sistema solo opera cuando hay
+                    evidencia suficiente.
+                  </p>
+                )}
+                {orders.map((order) => (
+                  <div
+                    key={order.id}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800/70 bg-zinc-950/60 px-3 py-2 text-xs"
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="font-mono">{order.symbol}</span>
+                      <span className="text-zinc-600">
+                        {timeOnly(order.created_at)}
+                      </span>
                     </div>
-                  ))}
-                </div>
-              </div>
+                    <div className="flex shrink-0 flex-col items-end">
+                      <span
+                        className={`font-mono tabular-nums ${
+                          order.side === "BUY"
+                            ? "text-emerald-400"
+                            : "text-rose-400"
+                        }`}
+                      >
+                        {order.side} {Number(order.quantity).toFixed(6)}
+                      </span>
+                      <span className="text-zinc-500 tabular-nums">
+                        @ {money(order.fill_price)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </Panel>
             </section>
           </>
         )}
