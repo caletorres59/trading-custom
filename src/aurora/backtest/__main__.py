@@ -112,7 +112,12 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Backtest the configured strategy against Coinbase history")
     parser.add_argument("--config", default="config/config.yaml")
-    parser.add_argument("--days", type=int, default=90, help="How many days of history to test against")
+    # Default lowered 90 -> 15 on 2026-09-19 per user request (faster
+    # iteration / "reporte quincenal") - fewer trades per window (~40-45 vs
+    # ~250 at 90d for this strategy), so treat any single 15d result as
+    # noisier evidence than before; still worth a fresh 90d (or longer)
+    # check before shipping a change to config.yaml, per Regla 4.
+    parser.add_argument("--days", type=int, default=15, help="How many days of history to test against")
     parser.add_argument(
         "--symbols",
         default=None,
