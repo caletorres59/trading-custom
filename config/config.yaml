@@ -65,25 +65,27 @@ strategy:
   er_threshold: 0.35
 
 risk:
-  # Aggressive profile v2 (2026-08-22d) — strategy itself left untouched
-  # (still volatility_spike, window=20, spike_multiplier=2.0), only these
-  # risk numbers raised, per explicit user decision to chase ~7%/month with
-  # simulated money and accept the possibility of losing all of it.
-  # Re-backtested on the full 90d BTC-USD/ETH-USD window *after* fixing the
-  # drawdown-deadlock bug (commit f24c524) that had been silently inflating
-  # every earlier number in this file's history: at this position size, BTC
-  # total return over the full window is -3.06% and ETH is +0.44% - neither
-  # asset reliably clears 7%/month, and bigger sizes tested (15-40%) did
-  # worse on both, not better, since size just amplifies whichever month you
-  # happen to be in. The one honest data point supporting a "7% shot": BTC's
-  # best single month at this size hit +18.8% (June), so a good month *can*
-  # clear the target - a bad month (July, -24.4% at this size) can erase it
-  # just as fast. This is the closest real-data-backed attempt at the user's
-  # target, not a validated edge. Rollback: config/config.conservative.yaml
-  # + git tag pre-aggressive-baseline-2026-08-22.
+  # max_position_pct lowered 10% -> 2% on 2026-09-18, in direct response to
+  # the user asking "should we raise risk to reach 7%/month" after the
+  # ETH-USD addition. Tested that exact question first (2%/5%/10%/15%/20%/
+  # 30%/40%, 90d BTC+ETH basket, real 0.25% fee, current strategy): result
+  # was the OPPOSITE of the premise - raising size made every metric worse,
+  # smoothly and monotonically (total return +18.57%@2% -> +10.86%@10% ->
+  # +3.48%@30%; Sharpe 2.89 -> 1.87 -> 0.68; maxDD 4.39% -> 6.32% -> 8.88%).
+  # Root cause: bigger per-trade size hits max_portfolio_exposure_pct (50%)
+  # sooner, so good signals start getting REJECTed instead of filled (13
+  # rejects@2% -> 62@30-40%) - fewer of the strategy's good trades actually
+  # land, and the ones that do concentrate risk into fewer, more correlated
+  # bets (ETH's contribution flipped from +$15,973@2% to -$1,037@30%). Same
+  # "size doesn't create edge" lesson as every prior sweep in this project,
+  # just showing up in the other direction this time. Shipped without a
+  # second robustness check (unlike prior strategy changes) at the user's
+  # explicit request, to be monitored daily instead - this is also a risk
+  # DECREASE, not an increase, so the downside of being wrong is smaller
+  # than usual. Rollback: git tag pre-2pct-position-2026-09-18.
   max_daily_loss_pct: 15.0
   max_trade_risk_pct: 0.5
-  max_position_pct: 10.0
+  max_position_pct: 2.0
   max_portfolio_exposure_pct: 50.0
   max_drawdown_pct: 30.0
   max_leverage: 1.0
@@ -99,9 +101,11 @@ risk:
 # no-exit baseline) or made both assets worse (tighter thresholds), never
 # better, at any point in the grid. Isolating the two pieces confirmed
 # why: the hard stop_loss essentially never fires at this position size
-# (10% max_position_pct means no single trade is ever down enough to trip
-# a realistic stop before the strategy's own logic or the kill switch
-# would have acted anyway), and the trailing exit just interrupts this
+# (a small max_position_pct means no single trade is ever down enough to
+# trip a realistic stop before the strategy's own logic or the kill switch
+# would have acted anyway - even more true now that max_position_pct is
+# 2% instead of the 10% this was tested against), and the trailing exit
+# just interrupts this
 # strategy's actual way of capturing a trend - repeated staggered re-entries
 # on successive spikes, not one long static hold - so an early trailing
 # exit forces an unnecessary sell-then-rebuy (extra fees) without
