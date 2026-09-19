@@ -8,6 +8,7 @@ from aurora.db.models import AuditEvent, OrderRecord
 from aurora.db.session import init_db, session_scope
 from aurora.engine.loop import TradingLoop
 from aurora.risk.risk_engine import HardRiskEngine
+from aurora.risk.trailing_stop import TrailingStopConfig
 from aurora.strategy.base import Direction, Signal, Strategy
 from tests.test_alpaca_broker import FakeSession, bookkeeping
 
@@ -54,6 +55,7 @@ def make_config(**overrides):
         timeframe="5m",
         strategy=StrategyConfig(name="forced", params={}),
         risk=risk,
+        exits=TrailingStopConfig(),
         loop_interval_seconds=60,
         starting_equity=Decimal("100000"),
         database_url="sqlite://",
@@ -130,3 +132,40 @@ def test_allow_short_true_lets_a_naked_short_through():
     posts = [c for c in session.log if c[0] == "POST"]
     assert len(posts) == 1
     assert posts[0][3]["side"] == "sell"
+
+
+def test_trailing_stop_flattens_a_held_position_independent_of_the_signal():
+    # Strategy says NO_TRADE this tick, but price has fallen past the hard
+    # stop-loss from the position's entry - the exit must still fire (see
+    # roadmap #3, asymmetric exits: this runs every tick, not only when the
+    # strategy itself speaks up).
+    session = FakeSession()
+    session.positions = [{"symbol": "BTCUSD", "qty": "0.05", "avg_entry_price": "79000"}]
+    session.next_fill = ("0.05", "77000")
+    config = make_config(exits=TrailingStopConfig(
+        enabled=True, stop_loss_pct=Decimal("2"), trail_activation_pct=Decimal("0"), trail_pct=Decimal("0")
+    ))
+    loop, sf = build_loop(Direction.NO_TRADE, session, [77000] * 25, config=config)
+
+    loop.run_once()
+
+    posts = [c for c in session.log if c[0] == "POST"]
+    assert len(posts) == 1
+    body = posts[0][3]
+    assert body["side"] == "sell"
+    assert Decimal(body["qty"]) == Decimal("0.05")  # full position closed
+
+    with session_scope(sf) as s:
+        events = [e.event_type for e in s.query(AuditEvent).all()]
+        assert "TRAILING_STOP_EXIT" in events
+
+
+def test_trailing_stop_disabled_by_default_leaves_a_losing_position_open():
+    session = FakeSession()
+    session.positions = [{"symbol": "BTCUSD", "qty": "0.05", "avg_entry_price": "79000"}]
+    loop, sf = build_loop(Direction.NO_TRADE, session, [50000] * 25, config=make_config())  # exits off by default
+
+    loop.run_once()
+
+    posts = [c for c in session.log if c[0] == "POST"]
+    assert posts == []  # no trailing-stop config -> no exit order, regardless of price

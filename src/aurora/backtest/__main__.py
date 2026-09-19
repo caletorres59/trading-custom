@@ -35,6 +35,7 @@ def _run_single(config: AppConfig, symbol: str, days: int) -> None:
         symbol=symbol,
         starting_equity=config.starting_equity,
         allow_short=config.allow_short,
+        exits=config.exits,
     )
     result = engine.run(candles)
 
@@ -53,6 +54,7 @@ def _run_single(config: AppConfig, symbol: str, days: int) -> None:
     print(f"Emergency stops:       {result.emergency_stops}")
     print(f"Watchdog blocks:       {result.watchdog_blocks}")
     print(f"Circuit breaker flattens: {result.circuit_breaker_flattens}")
+    print(f"Trailing stop exits:   {result.trailing_stop_exits}")
     print(f"Total fees paid:       ${result.total_fees:,.2f}")
     print("=" * 60)
 
@@ -74,6 +76,7 @@ def _run_multi(config: AppConfig, symbols: list[str], days: int) -> None:
         symbols=symbols,
         starting_equity=config.starting_equity,
         allow_short=config.allow_short,
+        exits=config.exits,
     )
     result = engine.run(candles_by_symbol)
 
@@ -93,6 +96,7 @@ def _run_multi(config: AppConfig, symbols: list[str], days: int) -> None:
     print(f"Emergency stops:       {result.emergency_stops}")
     print(f"Watchdog blocks:       {result.watchdog_blocks}")
     print(f"Circuit breaker flattens: {result.circuit_breaker_flattens}")
+    print(f"Trailing stop exits:   {result.trailing_stop_exits}")
     print(f"Total fees paid:       ${result.total_fees:,.2f}")
     print("-" * 60)
     print("Per-symbol contribution to total P&L (exact, sums to total):")

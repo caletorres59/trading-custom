@@ -75,6 +75,20 @@ class PortfolioState(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class PositionStopState(Base):
+    """Per-symbol high-water-mark for the trailing-stop exit manager
+    (roadmap #3, asymmetric exits). One process per scheduled live run
+    can't keep this in memory between runs the way a backtest does, so it's
+    persisted here the same way PortfolioState is - loaded at the start of
+    a run, updated every tick, cleared once the position is flat again."""
+
+    __tablename__ = "position_stop_state"
+
+    symbol: Mapped[str] = mapped_column(String, primary_key=True)
+    high_water_price: Mapped[Decimal] = mapped_column(Numeric(20, 8))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class EquitySnapshot(Base):
     """One row per run_once(), so the dashboard has a real time series to
     chart instead of only ever seeing the latest PortfolioState."""

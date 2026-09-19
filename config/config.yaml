@@ -2,6 +2,24 @@ mode: PAPER  # PAPER -> Alpaca paper endpoint; LIVE -> Alpaca live (manual switc
 
 symbols:
   - BTC-USD
+  # Added 2026-09-18. The 09-18 check-in found the live account had gone
+  # completely quiet for 10 straight days (09-07 to 09-17, zero trades -
+  # the regime filter correctly sat out a choppy/declining BTC stretch) and
+  # only traded on the 11th day when BTC finally broke out. Adding ETH-USD
+  # doesn't fix the filter's selectivity, but it does roughly double the
+  # number of chances per day for *some* symbol to qualify. 90d backtest
+  # (real 0.25% fee, current strategy/risk params, shared $100k account /
+  # 50% exposure cap - i.e. the actual live setup, not two separate
+  # accounts): BTC-only +10.45% (maxDD 4.74%, Sharpe 2.53, 124 trades) vs
+  # BTC+ETH basket +10.75% (maxDD 6.32%, Sharpe 1.87, 251 trades - roughly
+  # 2x the trade frequency). Total return is only modestly better and the
+  # risk-adjusted profile (Sharpe, drawdown) is actually a bit worse than
+  # BTC alone, since BTC/ETH are highly correlated (little real
+  # diversification - same lesson as roadmap idea #1's basket rejection).
+  # Shipped anyway for the trade-frequency benefit, which directly answers
+  # what the 09-18 check-in flagged as broken; still one 90d window, not a
+  # validated edge (Regla 4).
+  - ETH-USD
 
 timeframe: "5m"
 
@@ -70,5 +88,31 @@ risk:
   max_drawdown_pct: 30.0
   max_leverage: 1.0
   max_trades_per_day: 30
+
+
+# Roadmap #3 (asymmetric exits / "let winners run") - built 2026-09-18
+# (src/aurora/risk/trailing_stop.py, tested end-to-end in both backtest
+# engines and the live loop) but NOT enabled. 90d BTC+ETH sweep (real
+# 0.25% fee, current strategy/risk params) tested a stop_loss_pct 2-12% x
+# trail_activation_pct 2-20% x trail_pct 1-10% grid: every combination
+# either did nothing (loose thresholds never fired - identical to the
+# no-exit baseline) or made both assets worse (tighter thresholds), never
+# better, at any point in the grid. Isolating the two pieces confirmed
+# why: the hard stop_loss essentially never fires at this position size
+# (10% max_position_pct means no single trade is ever down enough to trip
+# a realistic stop before the strategy's own logic or the kill switch
+# would have acted anyway), and the trailing exit just interrupts this
+# strategy's actual way of capturing a trend - repeated staggered re-entries
+# on successive spikes, not one long static hold - so an early trailing
+# exit forces an unnecessary sell-then-rebuy (extra fees) without
+# capturing any extra upside. Rejected per the same "backtest first, ship
+# only if it helps" standard as roadmap idea #1 (multi-symbol basket).
+# Kept in the codebase, off by default, in case a future strategy change
+# (one that holds fewer, larger positions) makes it worth revisiting.
+exits:
+  enabled: false
+  stop_loss_pct: 0
+  trail_activation_pct: 0
+  trail_pct: 0
 
 loop_interval_seconds: 60

@@ -9,6 +9,7 @@ import pandas as pd
 from aurora.broker.base import Order, OrderSide, OrderType
 from aurora.broker.paper_broker import PaperSimulatorBroker
 from aurora.risk.risk_engine import AccountState, HardRiskEngine, RiskDecisionType, TradeRequest
+from aurora.risk.trailing_stop import TrailingStopConfig, TrailingStopEngine
 from aurora.risk.watchdogs import blocking_failure, run_watchdogs
 from aurora.strategy.base import Direction, Strategy
 
@@ -41,6 +42,7 @@ class BacktestResult:
     emergency_stops: int
     circuit_breaker_flattens: int
     watchdog_blocks: int = 0
+    trailing_stop_exits: int = 0
 
     @property
     def total_return_pct(self) -> Decimal:
@@ -86,6 +88,7 @@ class BacktestEngine:
         starting_equity: Decimal,
         stop_distance_pct: Decimal = DEFAULT_STOP_DISTANCE_PCT,
         allow_short: bool = False,
+        exits: TrailingStopConfig = TrailingStopConfig(),
     ):
         self.strategy = strategy
         self.risk_engine = risk_engine
@@ -96,6 +99,10 @@ class BacktestEngine:
         # position, so by default a SELL is clamped to the held quantity here
         # too - keeps backtest behavior identical to live.
         self.allow_short = allow_short
+        # Roadmap #3 (asymmetric exits) - long-only position management
+        # layered on top of the strategy's own entries; disabled (no-op) by
+        # default so existing callers/tests are unaffected.
+        self.trailing_stop = TrailingStopEngine(exits)
 
     def run(self, candles: pd.DataFrame) -> BacktestResult:
         min_lookback = getattr(self.strategy, "slow_period", 1) + 1
@@ -120,8 +127,10 @@ class BacktestEngine:
         emergency_stops = 0
         circuit_breaker_flattens = 0
         watchdog_blocks = 0
+        trailing_stop_exits = 0
         max_dd = Decimal("0")
         last_recorded_day = None
+        trailing_high_water: Decimal | None = None
 
         for i in range(min_lookback, len(candles)):
             window = candles.iloc[: i + 1]
@@ -168,6 +177,34 @@ class BacktestEngine:
                         risk_decision=kill_switch.decision.value,
                     ))
                 broker.reset_drawdown_baseline()
+                trailing_high_water = None
+
+            position = next((p for p in broker.get_positions() if p.symbol == self.symbol), None)
+            if position is None or position.quantity <= 0:
+                trailing_high_water = None
+            else:
+                ts_decision = self.trailing_stop.evaluate(
+                    current_price=last_price,
+                    entry_price=position.average_entry_price,
+                    high_water_price=trailing_high_water,
+                )
+                trailing_high_water = ts_decision.high_water_price
+                if ts_decision.should_exit:
+                    order = Order(symbol=self.symbol, side=OrderSide.SELL, order_type=OrderType.MARKET, quantity=position.quantity)
+                    result = broker.submit(order)
+                    fee = result.filled_quantity * (result.average_fill_price or Decimal("0")) * Decimal("0.001")
+                    total_fees += fee
+                    trailing_stop_exits += 1
+                    trades.append(TradeLogEntry(
+                        time=row["open_time"],
+                        direction=ts_decision.reason or "TRAILING_EXIT",
+                        side="SELL",
+                        quantity=result.filled_quantity,
+                        price=result.average_fill_price or Decimal("0"),
+                        confidence=0.0,
+                        risk_decision="TRAILING_EXIT",
+                    ))
+                    trailing_high_water = None
 
             signal = self.strategy.generate_signal(self.symbol, window)
 
@@ -257,4 +294,5 @@ class BacktestEngine:
             risk_rejections=risk_rejections,
             emergency_stops=emergency_stops,
             circuit_breaker_flattens=circuit_breaker_flattens,
+            trailing_stop_exits=trailing_stop_exits,
         )

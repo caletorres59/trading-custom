@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import sessionmaker
 
-from aurora.db.models import PortfolioState
+from aurora.db.models import PortfolioState, PositionStopState
 from aurora.db.session import session_scope
 
 STATE_ID = "default"  # single portfolio for this MVP; one row is enough
@@ -51,3 +51,25 @@ def save_portfolio_state(session_factory: sessionmaker, state: dict) -> None:
         row.state_day = state["state_day"]
         row.trades_today = state["trades_today"]
         row.positions_json = json.dumps(state["positions"])
+
+
+def load_trailing_stop_state(session_factory: sessionmaker, symbol: str) -> Decimal | None:
+    with session_scope(session_factory) as session:
+        row = session.get(PositionStopState, symbol)
+        return row.high_water_price if row is not None else None
+
+
+def save_trailing_stop_state(session_factory: sessionmaker, symbol: str, high_water_price: Decimal) -> None:
+    with session_scope(session_factory) as session:
+        row = session.get(PositionStopState, symbol)
+        if row is None:
+            row = PositionStopState(symbol=symbol)
+            session.add(row)
+        row.high_water_price = high_water_price
+
+
+def clear_trailing_stop_state(session_factory: sessionmaker, symbol: str) -> None:
+    with session_scope(session_factory) as session:
+        row = session.get(PositionStopState, symbol)
+        if row is not None:
+            session.delete(row)

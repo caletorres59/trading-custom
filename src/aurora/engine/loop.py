@@ -11,10 +11,16 @@ from sqlalchemy.orm import sessionmaker
 from aurora.broker.base import Order, OrderSide, OrderType, TradingBroker
 from aurora.config import AppConfig
 from aurora.db.models import AuditEvent, EquitySnapshot, OrderRecord, RiskDecisionRecord, SignalRecord
-from aurora.db.portfolio_store import save_portfolio_state
+from aurora.db.portfolio_store import (
+    clear_trailing_stop_state,
+    load_trailing_stop_state,
+    save_portfolio_state,
+    save_trailing_stop_state,
+)
 from aurora.db.session import session_scope
 from aurora.market_data.coinbase_provider import CoinbasePublicMarketData
 from aurora.risk.risk_engine import AccountState, HardRiskEngine, RiskDecisionType, TradeRequest
+from aurora.risk.trailing_stop import TrailingStopEngine
 from aurora.risk.watchdogs import blocking_failure, run_watchdogs
 from aurora.strategy.base import Direction, Strategy
 
@@ -44,6 +50,10 @@ class TradingLoop:
         self.strategy = strategy
         self.risk_engine = risk_engine
         self.session_factory = session_factory
+        # Roadmap #3 (asymmetric exits) - deterministic position management
+        # layered on top of the strategy's own entries; a no-op unless
+        # config.yaml's exits.enabled is true.
+        self.trailing_stop = TrailingStopEngine(config.exits)
 
     def run_once(self) -> None:
         for symbol in self.config.symbols:
@@ -128,6 +138,57 @@ class TradingLoop:
                 ))
 
         self.broker.reset_drawdown_baseline()
+        clear_trailing_stop_state(self.session_factory, symbol)
+
+    def _enforce_trailing_stop(self, symbol: str, last_price: Decimal, correlation_id: str) -> None:
+        """Runs every tick, independent of the strategy's own signal - the
+        same reasoning as _enforce_kill_switch: a big move can happen
+        between two sparse strategy signals, so a winner needs its own
+        continuous exit check rather than waiting for the strategy to next
+        speak up (see roadmap #3, asymmetric exits)."""
+        position = next((p for p in self.broker.get_positions() if p.symbol == symbol), None)
+        if position is None or position.quantity <= 0:
+            clear_trailing_stop_state(self.session_factory, symbol)
+            return
+
+        stored_high_water = load_trailing_stop_state(self.session_factory, symbol)
+        decision = self.trailing_stop.evaluate(
+            current_price=last_price,
+            entry_price=position.average_entry_price,
+            high_water_price=stored_high_water,
+        )
+
+        if not decision.should_exit:
+            save_trailing_stop_state(self.session_factory, symbol, decision.high_water_price)
+            return
+
+        order = Order(symbol=symbol, side=OrderSide.SELL, order_type=OrderType.MARKET, quantity=position.quantity)
+        result = self.broker.submit(order)
+        logger.warning(
+            "trailing_stop_exit symbol=%s reason=%s quantity=%s",
+            symbol, decision.reason, result.filled_quantity,
+        )
+        with session_scope(self.session_factory) as session:
+            session.add(OrderRecord(
+                correlation_id=correlation_id,
+                broker_order_id=result.broker_order_id,
+                symbol=symbol,
+                side=OrderSide.SELL.value,
+                quantity=result.filled_quantity,
+                fill_price=result.average_fill_price or Decimal("0"),
+                status=result.status.value,
+            ))
+            session.add(AuditEvent(
+                correlation_id=correlation_id,
+                event_type="TRAILING_STOP_EXIT",
+                payload=json.dumps({
+                    "symbol": symbol,
+                    "reason": decision.reason,
+                    "quantity": str(result.filled_quantity),
+                    "price": str(result.average_fill_price),
+                }),
+            ))
+        clear_trailing_stop_state(self.session_factory, symbol)
 
     def _process_symbol(self, symbol: str) -> None:
         correlation_id = str(uuid.uuid4())
@@ -135,6 +196,7 @@ class TradingLoop:
         last_price = Decimal(str(candles["close"].iloc[-1]))
 
         self._enforce_kill_switch(symbol, correlation_id)
+        self._enforce_trailing_stop(symbol, last_price, correlation_id)
 
         signal = self.strategy.generate_signal(symbol, candles)
         logger.info(

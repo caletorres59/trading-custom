@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from aurora.risk.trailing_stop import TrailingStopConfig
+
 
 @dataclass(frozen=True)
 class RiskLimits:
@@ -32,6 +34,7 @@ class AppConfig:
     timeframe: str
     strategy: StrategyConfig
     risk: RiskLimits
+    exits: TrailingStopConfig
     loop_interval_seconds: int
     starting_equity: Decimal
     database_url: str
@@ -70,12 +73,21 @@ def load_config(path: str | Path = "config/config.yaml") -> AppConfig:
 
     mode = raw.get("mode", "PAPER")
 
+    exits_raw = raw.get("exits", {})
+    exits = TrailingStopConfig(
+        enabled=bool(exits_raw.get("enabled", False)),
+        stop_loss_pct=Decimal(str(exits_raw.get("stop_loss_pct", "0"))),
+        trail_activation_pct=Decimal(str(exits_raw.get("trail_activation_pct", "0"))),
+        trail_pct=Decimal(str(exits_raw.get("trail_pct", "0"))),
+    )
+
     return AppConfig(
         mode=mode,
         symbols=raw["symbols"],
         timeframe=raw["timeframe"],
         strategy=strategy,
         risk=risk,
+        exits=exits,
         loop_interval_seconds=int(raw.get("loop_interval_seconds", 60)),
         starting_equity=Decimal(str(raw.get("starting_equity", "1000"))),
         database_url=os.environ.get("DATABASE_URL", "sqlite:///./aurora.db"),

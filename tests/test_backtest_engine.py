@@ -5,6 +5,7 @@ import pandas as pd
 from aurora.backtest.engine import BacktestEngine
 from aurora.config import RiskLimits
 from aurora.risk.risk_engine import HardRiskEngine
+from aurora.risk.trailing_stop import TrailingStopConfig
 from aurora.strategy.base import Direction, Signal, Strategy
 
 
@@ -83,6 +84,60 @@ def test_allow_short_true_still_lets_the_backtest_open_shorts():
     )
     result = engine.run(make_candles([100, 100, 100, 100, 100, 100, 100, 100]))
     assert len(result.trades) > 0
+
+
+class BuyOnceStrategy(Strategy):
+    """Enters LONG on the first bar it's asked about, then goes quiet -
+    isolates the trailing-stop manager as the only thing that can still
+    act on the position afterward."""
+
+    name = "buy_once"
+
+    def __init__(self):
+        self.bought = False
+
+    def generate_signal(self, symbol, candles):
+        if not self.bought:
+            self.bought = True
+            return Signal(symbol, Direction.LONG, 1.0, ["ENTRY"])
+        return Signal(symbol, Direction.NO_TRADE, 0.0, ["HOLD"])
+
+
+def test_trailing_stop_exits_a_winner_after_it_pulls_back_from_its_high():
+    # Entry ~100, runs up to 110 (past the 3% activation), pulls back to
+    # 108.5 (not far enough off the 110 high-water mark yet), then to 107
+    # (past the 2% trail off 110 = 107.8) -> exit, without the strategy
+    # ever emitting another signal.
+    engine = BacktestEngine(
+        strategy=BuyOnceStrategy(),
+        risk_engine=HardRiskEngine(_permissive_limits()),
+        symbol="BTC-USD",
+        starting_equity=Decimal("1000"),
+        allow_short=False,
+        exits=TrailingStopConfig(
+            enabled=True, stop_loss_pct=Decimal("0"), trail_activation_pct=Decimal("3"), trail_pct=Decimal("2")
+        ),
+    )
+    result = engine.run(make_candles([100, 100, 100, 110, 108.5, 107]))
+
+    exit_trades = [t for t in result.trades if t.direction == "TRAILING_STOP"]
+    assert len(exit_trades) == 1
+    assert exit_trades[0].side == "SELL"
+    assert result.trailing_stop_exits == 1
+
+
+def test_trailing_stop_disabled_by_default_never_exits_on_its_own():
+    engine = BacktestEngine(
+        strategy=BuyOnceStrategy(),
+        risk_engine=HardRiskEngine(_permissive_limits()),
+        symbol="BTC-USD",
+        starting_equity=Decimal("1000"),
+        allow_short=False,
+    )
+    result = engine.run(make_candles([100, 100, 100, 110, 108.5, 60]))  # even a big crash
+
+    assert result.trailing_stop_exits == 0
+    assert all(t.risk_decision != "TRAILING_EXIT" for t in result.trades)
 
 
 def make_candles(closes: list[float]) -> pd.DataFrame:

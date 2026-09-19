@@ -10,6 +10,7 @@ from aurora.backtest.engine import DEFAULT_STOP_DISTANCE_PCT, TradeLogEntry
 from aurora.broker.base import Order, OrderSide, OrderType
 from aurora.broker.paper_broker import PaperSimulatorBroker
 from aurora.risk.risk_engine import AccountState, HardRiskEngine, RiskDecisionType, TradeRequest
+from aurora.risk.trailing_stop import TrailingStopConfig, TrailingStopEngine
 from aurora.risk.watchdogs import blocking_failure, run_watchdogs
 from aurora.strategy.base import Direction, Strategy
 
@@ -35,6 +36,7 @@ class MultiSymbolBacktestResult:
     emergency_stops: int
     circuit_breaker_flattens: int
     watchdog_blocks: int
+    trailing_stop_exits: int = 0
     per_symbol: dict[str, SymbolStats] = field(default_factory=dict)
 
     @property
@@ -87,6 +89,7 @@ class MultiSymbolBacktestEngine:
         starting_equity: Decimal,
         stop_distance_pct: Decimal = DEFAULT_STOP_DISTANCE_PCT,
         allow_short: bool = False,
+        exits: TrailingStopConfig = TrailingStopConfig(),
     ):
         self.strategies = strategies
         self.risk_engine = risk_engine
@@ -94,6 +97,7 @@ class MultiSymbolBacktestEngine:
         self.starting_equity = starting_equity
         self.stop_distance_pct = stop_distance_pct
         self.allow_short = allow_short
+        self.trailing_stop = TrailingStopEngine(exits)
 
     def run(self, candles_by_symbol: dict[str, pd.DataFrame]) -> MultiSymbolBacktestResult:
         for symbol in self.symbols:
@@ -135,9 +139,11 @@ class MultiSymbolBacktestEngine:
         emergency_stops = 0
         circuit_breaker_flattens = 0
         watchdog_blocks = 0
+        trailing_stop_exits = 0
         max_dd = Decimal("0")
         last_recorded_day = None
         last_price: dict[str, Decimal] = {}
+        trailing_high_water: dict[str, Decimal] = {}
 
         def record_fill(symbol: str, side: OrderSide, qty: Decimal, price: Decimal) -> Decimal:
             notional = qty * price
@@ -200,6 +206,40 @@ class MultiSymbolBacktestEngine:
                         symbol=position.symbol,
                     ))
                 broker.reset_drawdown_baseline()
+                for position in broker.get_positions():
+                    trailing_high_water.pop(position.symbol, None)
+
+            for symbol in active:
+                positions = broker.get_positions()
+                position = next((p for p in positions if p.symbol == symbol), None)
+                if position is None or position.quantity <= 0:
+                    trailing_high_water.pop(symbol, None)
+                    continue
+                ts_decision = self.trailing_stop.evaluate(
+                    current_price=last_price[symbol],
+                    entry_price=position.average_entry_price,
+                    high_water_price=trailing_high_water.get(symbol),
+                )
+                trailing_high_water[symbol] = ts_decision.high_water_price
+                if ts_decision.should_exit:
+                    order = Order(symbol=symbol, side=OrderSide.SELL, order_type=OrderType.MARKET, quantity=position.quantity)
+                    result = broker.submit(order)
+                    total_fees += record_fill(
+                        symbol, OrderSide.SELL, result.filled_quantity, result.average_fill_price or Decimal("0")
+                    )
+                    trailing_stop_exits += 1
+                    per_symbol[symbol].trades += 1
+                    trades.append(TradeLogEntry(
+                        time=ts,
+                        direction=ts_decision.reason or "TRAILING_EXIT",
+                        side="SELL",
+                        quantity=result.filled_quantity,
+                        price=result.average_fill_price or Decimal("0"),
+                        confidence=0.0,
+                        risk_decision="TRAILING_EXIT",
+                        symbol=symbol,
+                    ))
+                    trailing_high_water.pop(symbol, None)
 
             for symbol in active:
                 idx = index_of[symbol][ts]
@@ -315,5 +355,6 @@ class MultiSymbolBacktestEngine:
             emergency_stops=emergency_stops,
             circuit_breaker_flattens=circuit_breaker_flattens,
             watchdog_blocks=watchdog_blocks,
+            trailing_stop_exits=trailing_stop_exits,
             per_symbol=per_symbol,
         )
